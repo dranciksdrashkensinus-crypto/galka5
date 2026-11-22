@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>ГАЛЬКА: Подземный Ритм</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <span class="logo">ГАЛЬКА<span class="logo-dot">.</span></span>
+      <span class="sub">подземный ритм — 2D RPG</span>
+      <button id="muteBtn" class="chip" type="button" title="Звук (M)">♪ ЗВУК ВКЛ</button>
+    </header>
+
+    <div id="frame" class="frame">
+      <canvas id="game" width="640" height="480" aria-label="Игра Галька: Подземный ритм"></canvas>
+      <div class="rotate-hint">↻ Поверни телефон горизонтально — экран будет больше</div>
+      <div id="touch" class="touch" aria-hidden="true">
+        <div class="touch-left">
+          <button data-key="x" class="btn-back" aria-label="Назад">↩</button>
+          <button data-key="z" class="btn-act" aria-label="Действие">ОК</button>
+        </div>
+        <div id="stick" class="stick" aria-label="Джойстик управления">
+          <div id="stickKnob" class="stick-knob"></div>
+        </div>
+      </div>
+    </div>
+
+    <footer class="help">
+      <span class="pc-help"><kbd>WASD</kbd> / <kbd>↑↓←→</kbd> — движение</span>
+      <span class="pc-help"><kbd>Z</kbd> / <kbd>Enter</kbd> — выбор</span>
+      <span class="pc-help"><kbd>X</kbd> / <kbd>Esc</kbd> — назад</span>
+      <span class="pc-help"><kbd>Z</kbd> в бою — рывок</span>
+      <span class="pc-help"><kbd>M</kbd> — звук</span>
+      <span class="touch-help">Кружок справа — движение: веди его, куда идти. Круг «ОК» слева — говорить, выбирать, бить и рывок. ↩ — назад.</span>
+      <span class="hint">Совет: с боссами можно не драться, а договориться.</span>
+    </footer>
+    <p class="tiny">Портреты персонажей — из присланных тобой картинок. Кликай по канвасу один раз, чтобы включить звук.</p>
+  </div>
+
+  <script src="audio.js"></script>
+  <script src="art.js"></script>
+  <script src="data.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
