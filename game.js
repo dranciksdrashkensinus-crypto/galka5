@@ -2280,6 +2280,7 @@
       if (beaten) A.text(ctx, game.spared[b.id] ? '♥' : '×', x + 56, 397, { size: 14, color: game.spared[b.id] ? '#8affc8' : '#ff8fb8', align: 'center' });
     });
     A.text(ctx, Object.keys(ROOMS).length + ' МЕСТ · ' + (G.QUESTS || []).length + ' КВЕСТОВ · 5 БОССОВ ПО 3 ФАЗЫ · ГАЛЬКЕ 59', 320, 158, { size: 10, color: '#8e98c6', align: 'center' });
+    A.text(ctx, 'СБОРКА j · У УМНОГО 9999 HP, ПОЩАДЫ НЕТ · 9999 HP И БОЛЬШОГО УРОНА У ТЕБЯ НЕТ', 320, 176, { size: 9, color: '#ffd98a', align: 'center', shadow: false });
   }
 
   function drawGameOver() {
