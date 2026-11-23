@@ -29,6 +29,24 @@
     im.src = G.NEWCHARS[id].img;
     G.images[id] = im;
   });
+  /* Quest foes use "qf_*" ids and ".png" portrait strings, while their art is
+     already loaded under the short name (govnoed, globus, ...). Map all three
+     spellings to the same image so battles show the real portrait. */
+  Object.keys(G.QUEST_FOES || {}).forEach(k => {
+    const f = G.QUEST_FOES[k];
+    const src = String(f.portrait || '');
+    const base = src.replace(/\.png$/i, '');
+    if (!base) return;
+    let im = G.images[base] || G.images[src];
+    if (!im) { im = watchImage(new Image(), base); im.src = f.portrait; G.images[base] = im; }
+    G.images[src] = im;
+    if (f.id) G.images[f.id] = im;
+  });
+  function bossImage(boss) {
+    if (!boss) return null;
+    const p = String(boss.portrait || '');
+    return G.images[p] || G.images[p.replace(/\.png$/i, '')] || G.images[boss.id] || null;
+  }
 
   /* ---------------- input ---------------- */
 
@@ -385,7 +403,7 @@
         game.player.x = ownPeer.x; game.player.y = ownPeer.y;
       } else {
         /* A small nudge once per packet, not every frame. */
-        const k = 0.18;
+        const k = 0.12;
         game.player.x += (ownPeer.x - game.player.x) * k;
         game.player.y += (ownPeer.y - game.player.y) * k;
       }
@@ -399,26 +417,29 @@
       target.x += (p.x - target.x) * k;
       target.y += (p.y - target.y) * k;
     });
-    if (s.toast) toast = { text: s.toast, time: 1.8 };
-
-    if (s.dialogue) {
-      const sig = JSON.stringify([s.dialogue.speaker, s.dialogue.lines, s.dialogue.i]);
-      if (sig !== netDialogueSig) { netDialogueSig = sig; netDialogueDismissed = ''; }
-      if (netDialogueDismissed === sig) {
-        game.dialogue = null;
-      } else {
-        if (!game.dialogue || game.dialogue.sig !== sig) {
-          game.dialogue = new Dialog(s.dialogue.speaker, s.dialogue.lines, null);
-          game.dialogue.sig = sig;
-          game.dialogue.npcName = s.dialogue.npcName || '';
-          if (s.dialogue.imgKey && G.images[s.dialogue.imgKey]) game.dialogue.img = G.images[s.dialogue.imgKey];
+    /* Dialogue/text work only when a new packet arrives — on a phone doing
+       this 60 times a second for the same text was a noticeable slowdown. */
+    if (fresh || roomChanged) {
+      if (s.toast) toast = { text: s.toast, time: 1.8 };
+      if (s.dialogue) {
+        const sig = JSON.stringify([s.dialogue.speaker, s.dialogue.lines, s.dialogue.i]);
+        if (sig !== netDialogueSig) { netDialogueSig = sig; netDialogueDismissed = ''; }
+        if (netDialogueDismissed === sig) {
+          game.dialogue = null;
+        } else {
+          if (!game.dialogue || game.dialogue.sig !== sig) {
+            game.dialogue = new Dialog(s.dialogue.speaker, s.dialogue.lines, null);
+            game.dialogue.sig = sig;
+            game.dialogue.npcName = s.dialogue.npcName || '';
+            if (s.dialogue.imgKey && G.images[s.dialogue.imgKey]) game.dialogue.img = G.images[s.dialogue.imgKey];
+          }
+          game.dialogue.i = s.dialogue.i || 0;
+          game.dialogue.chars = s.dialogue.chars || 0;
         }
-        game.dialogue.i = s.dialogue.i || 0;
-        game.dialogue.chars = s.dialogue.chars || 0;
+      } else {
+        game.dialogue = null;
+        netDialogueSig = ''; netDialogueDismissed = '';
       }
-    } else {
-      game.dialogue = null;
-      netDialogueSig = ''; netDialogueDismissed = '';
     }
 
     if (s.battle) {
@@ -551,6 +572,7 @@
 
   function enterRoom(id, spawn, instant) {
     const doIt = () => {
+      const roomChanged = id !== game.roomId;
       game.roomId = id;
       const r = ROOMS[id];
       game.player.x = spawn.x; game.player.y = spawn.y;
@@ -559,7 +581,9 @@
       AU.setTrack(r.track);
       /* Guests must appear at the new room's entrance too, not keep the
          coordinates they had in the previous room. */
-      if (netMode === 'host' && netPlayers.length > 1) {
+      /* Only re-seat everyone on a REAL room change. Coming back from a
+       * battle calls enterRoom(sameRoom) — guests must stay where they stood. */
+      if (roomChanged && netMode === 'host' && netPlayers.length > 1) {
         netPlayers.forEach((q, i) => {
           if (i === 0) return;
           q.x = Math.max(24, Math.min(W - 24, spawn.x + 36 * i));
@@ -778,7 +802,7 @@
     if (n.questFoe) {
       const q = (G.QUESTS || []).find(x => x.id === n.questFoe);
       if (!q) return;
-      if (game.flags['qdone_' + q.id]) {
+      if (game.flags['qdone_' + q.id] || game.flags['qfoe_' + q.id] || game.flags['qitem_' + q.id]) {
         say([{ who: 'sys', text: 'Здесь уже разобрались. Иди к тому, кто просил.' }]);
         return;
       }
@@ -1024,16 +1048,9 @@
       }
     });
 
-    const p = game.player;
-    A.drawChar(ctx, G.images.heroine, p.x, p.y + 16, p.frame, {
-      width: 40, height: 52, legH: 13,
-      legColor: '#304848', bootColor: '#202236',
-      outline: netMode ? netSelfColor() : (game.lov > 2 ? 'rgba(255,143,184,.75)' : 'rgba(255,255,255,.45)')
-    });
+    /* Remote souls first, own soul last — otherwise your Галька disappears
+       behind another one when you stand close together. */
     if (netMode) {
-      A.text(ctx, (netPlayers[netSelfIndex] || {}).nick || 'ТЫ', p.x, p.y - 34, {
-        size: 9, color: netSelfColor(), align: 'center', shadow: false
-      });
       netPlayers.forEach((q, i) => {
         /* On a guest, index 0 is the HOST and must be drawn.
            Only hide index 0 on the host (that's their own soul). */
@@ -1045,6 +1062,17 @@
         A.text(ctx, q.nick.slice(0, 8), q.x, q.y - 34, {
           size: 9, color: q.color, align: 'center', shadow: false
         });
+      });
+    }
+    const p = game.player;
+    A.drawChar(ctx, G.images.heroine, p.x, p.y + 16, p.frame, {
+      width: 40, height: 52, legH: 13,
+      legColor: '#304848', bootColor: '#202236',
+      outline: netMode ? netSelfColor() : (game.lov > 2 ? 'rgba(255,143,184,.75)' : 'rgba(255,255,255,.45)')
+    });
+    if (netMode) {
+      A.text(ctx, (netPlayers[netSelfIndex] || {}).nick || 'ТЫ', p.x, p.y - 34, {
+        size: 9, color: netSelfColor(), align: 'center', shadow: false
       });
     }
 
@@ -1133,7 +1161,7 @@
 
   function sayBattle(lines, next) {
     game.dialogue = new Dialog(game.battle.boss.name, lines, () => { next(); });
-    if (game.battle) game.dialogue.img = G.images[game.battle.boss.portrait] || G.images[game.battle.boss.id];
+    if (game.battle) game.dialogue.img = bossImage(game.battle.boss);
   }
 
   function buildSchedule(b) {
@@ -1517,7 +1545,10 @@
     if (b.boss.quest) {
       if (type === 'spare') game.flags['qspare_' + b.boss.id] = true;
       else game.exp += b.boss.exp || 0;
-      if (b.boss.questId) game.flags['qitem_' + b.boss.questId] = true;
+      if (b.boss.questId) {
+        game.flags['qfoe_' + b.boss.questId] = true;
+        game.flags['qitem_' + b.boss.questId] = true;
+      }
       if (b.boss.rematch) game.flags.smartRematchDone = true;
       burst(320, 200, type === 'spare' ? '#8affc8' : b.boss.colors.main, 60, 160);
       sayBattle(b.boss[type], () => {
@@ -1858,7 +1889,7 @@
     const tiny = b.boss.id === 'director' ? 0.72 : 1;
     ctx.save();
     ctx.translate(320, 196); ctx.scale(pulse * tiny, pulse * tiny); ctx.translate(-320, -196);
-    A.drawChar(ctx, G.images[b.boss.portrait] || G.images[b.boss.id], 320, 288, Math.floor(T * 3) % 3, {
+    A.drawChar(ctx, bossImage(b.boss), 320, 288, Math.floor(T * 3) % 3, {
       width: 112, height: 132, legH: 20,
       legColor: b.boss.colors.dark, bootColor: '#111322',
       tint: b.slash > 0 ? '#ffffff' : null, tintAlpha: 0.55,
@@ -1888,7 +1919,7 @@
     }
 
     // portrait + info
-    A.portrait(ctx, G.images[b.boss.id], 20, 24, 124, 124, {
+    A.portrait(ctx, bossImage(b.boss), 20, 24, 124, 124, {
       bg: b.boss.colors.dark, flash: b.slash > 0.2 ? (b.slash - 0.2) * 1.4 : 0,
       fallback: b.boss.id, t: T
     });
