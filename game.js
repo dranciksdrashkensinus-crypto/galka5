@@ -20,16 +20,24 @@
   G.images.heroine = watchImage(new Image(), 'heroine');
   G.images.heroine.src = 'heroine.png';
 
-  /* Two extra looks for Галька. The first attached picture is Маша, the
-     second is Пастух. The default pixel Галька stays available too. */
+  /* Extra looks for Галька. Маша and Пастух are locked until you KILL their
+     boss versions. Спасать insufficiently — only killing opens the skin. */
   const SKINS = [
-    { name: 'ГАЛЬКА', img: 'heroine.png' },
-    { name: 'МАША', img: 'masha.png' },
-    { name: 'ПАСТУХ', img: 'pastuh.png' }
+    { id: 'gal', name: 'ГАЛЬКА', img: 'heroine.png' },
+    { id: 'masha', name: 'МАША', img: 'masha.png', boss: 'masha' },
+    { id: 'pastuh', name: 'ПАСТУХ', img: 'pastuh.png', boss: 'pastuh' }
   ];
   const SKIN_KEY = 'galka_skin_v1';
+  const SKIN_UNLOCK_KEY = 'galka_skin_unlocks_v1';
+  const skinUnlocked = { gal: true, masha: false, pastuh: false };
+  try { Object.assign(skinUnlocked, JSON.parse(localStorage.getItem(SKIN_UNLOCK_KEY) || '{}')); } catch (e) {}
+  function isSkinUnlocked(i) {
+    const s = SKINS[(i + SKINS.length) % SKINS.length];
+    return !!(s && skinUnlocked[s.id]);
+  }
   let skinIndex = 0;
   try { skinIndex = Math.max(0, Math.min(SKINS.length - 1, parseInt(localStorage.getItem(SKIN_KEY) || '0', 10) || 0)); } catch (e) {}
+  if (!isSkinUnlocked(skinIndex)) skinIndex = 0;
   SKINS.forEach((s, i) => {
     if (i === 0) return;
     const im = watchImage(new Image(), 'skin' + i);
@@ -42,9 +50,31 @@
       width: skinIndex ? 56 : 40, height: skinIndex ? 60 : 52, legH: skinIndex ? 14 : 13
     }, o || {});
   }
+  function saveSkin() { try { localStorage.setItem(SKIN_KEY, String(skinIndex)); } catch (e) {} }
   function setSkin(i) {
-    skinIndex = (i + SKINS.length) % SKINS.length;
-    try { localStorage.setItem(SKIN_KEY, String(skinIndex)); } catch (e) {}
+    let k = ((i % SKINS.length) + SKINS.length) % SKINS.length;
+    for (let n = 0; n < SKINS.length; n++) {
+      if (isSkinUnlocked(k)) {
+        const changed = k !== skinIndex;
+        skinIndex = k;
+        saveSkin();
+        return changed;
+      }
+      k = (k + 1) % SKINS.length;
+    }
+    skinIndex = 0;
+    saveSkin();
+    return false;
+  }
+  function unlockSkinForBoss(bossId) {
+    const s = SKINS.find(x => x.boss === bossId);
+    if (!s || skinUnlocked[s.id]) return null;
+    skinUnlocked[s.id] = true;
+    try { localStorage.setItem(SKIN_UNLOCK_KEY, JSON.stringify(skinUnlocked)); } catch (e) {}
+    return s.name;
+  }
+  function lockedSkinNames() {
+    return SKINS.filter((s, i) => i > 0 && !isSkinUnlocked(i)).map(s => s.name);
   }
   G.setHeroSkin = setSkin;
   G.heroSkin = () => SKINS[skinIndex].name;
@@ -1188,7 +1218,7 @@
     A.text(ctx, 'КВЕСТЫ ' + (game.questsDone || 0) + '/' + ((G.QUESTS || []).length) + '  ·  МЕСТ ' + Object.keys(ROOMS).length, 529, 48, { size: 9, color: '#ffd98a', align: 'center', shadow: false });
     for (let i = 0; i < BOSSES.length; i++) {
       const b = BOSSES[i];
-      A.px(ctx, 448 + i * 24, 40, 16, 5, game.spared[b.id] ? '#8affc8' : game.defeated[b.id] ? '#ff8fb8' : '#3a3d5c');
+      A.px(ctx, 438 + i * 19, 40, 12, 5, game.spared[b.id] ? '#8affc8' : game.defeated[b.id] ? '#ff8fb8' : '#3a3d5c');
     }
 
     if (!game.dialogue) {
@@ -1726,19 +1756,24 @@
     game.maxHp += 5;
     game.hp = Math.min(game.maxHp, game.hp + 14);
     if (b.boss.id === 'abayunda') game.flags.dash = true;
+    /* Only killing Машу or Пастуха opens their look. Spare leaves it locked. */
+    const skinJustUnlocked = type === 'kill' ? unlockSkinForBoss(b.boss.id) : null;
     burst(320, 200, type === 'spare' ? '#8affc8' : b.boss.colors.main, 60, 160);
     sayBattle(b.boss[type], () => {
       saveGame();
       if (b.boss.final) { showEnding(); return; }
       const roomMap = {
         abayunda: 'school', afina: 'school', huyet: 'street', yasr: 'metro',
-        loma: 'lomaRoom', byba: 'bybaRoom', petrunya: 'petrunyaRoom', director: 'office'
+        loma: 'lomaRoom', byba: 'bybaRoom', petrunya: 'petrunyaRoom',
+        masha: 'mashaRoom', pastuh: 'pastuhRoom', director: 'office'
       };
       const id = roomMap[b.boss.id];
       game.battle = null;
       state = 'world';
       enterRoom(id, ROOMS[id].spawn);
-      showToast(type === 'spare' ? '✦ ДУША СПАСЕНА: ' + b.boss.name + '  (+5 макс. HP)' : '✦ ПОЛУЧЕНО EXP: ' + b.boss.exp + '  (+5 макс. HP)');
+      showToast(skinJustUnlocked
+        ? '✦ СКИН ОТКРЫТ: ' + skinJustUnlocked
+        : type === 'spare' ? '✦ ДУША СПАСЕНА: ' + b.boss.name + '  (+5 макс. HP)' : '✦ ПОЛУЧЕНО EXP: ' + b.boss.exp + '  (+5 макс. HP)');
     });
   }
 
@@ -1753,13 +1788,13 @@
       lines = [
         { who: 'sys', text: 'Ты вернулась домой. Ужин остыл. Кот не смотрел.' },
         { who: 'gal', text: 'Пятьдесят девять лет, а я всё ещё учу. Ладно. Урок кое-как получился.' },
-        { who: 'sys', text: 'КОНЕЦ: МИРНЫЙ МАРШРУТ. Пощажены все пятеро.' }
+        { who: 'sys', text: 'КОНЕЦ: МИРНЫЙ МАРШРУТ. Пощажены все ' + BOSSES.length + '.' }
       ];
     } else if (s === 0) {
       lines = [
         { who: 'sys', text: 'Ты вернулась домой. Тишина. Галька включила чайник — и то не помогло.' },
         { who: 'gal', text: 'Я победила. И что?' },
-        { who: 'sys', text: 'КОНЕЦ: ХОЛОДНЫЙ СЧЁТ. 0 пощад. 5 осколков в кармане.' }
+        { who: 'sys', text: 'КОНЕЦ: ХОЛОДНЫЙ СЧЁТ. 0 пощад. ' + BOSSES.length + ' осколков в кармане.' }
       ];
     } else {
       lines = [
@@ -2271,7 +2306,8 @@
   function titleOptions() {
     const opts = ['НОВАЯ ИГРА'];
     if (hasSave()) opts.push('ПРОДОЛЖИТЬ');
-    opts.push('СКИН: ' + G.heroSkin());
+    const locked = lockedSkinNames();
+    opts.push('СКИН: ' + G.heroSkin() + (locked.length ? ' · ЗАКР: ' + locked.join(',') : ''));
     opts.push('АККАУНТ И ТОПЫ');
     opts.push('СОЗДАТЬ ЛОББИ');
     opts.push('ВОЙТИ ПО КОДУ');
@@ -2312,15 +2348,15 @@
       size: 9, color: netOnline ? '#8affc8' : '#ff9ec0', align: 'center', shadow: false
     });
 
-    // boss thumbnails — all eight story bosses, including the three newcomers
+    // boss thumbnails — all ten story bosses
     BOSSES.forEach((b, i) => {
-      const x = 37 + i * 72;
+      const x = 20 + i * 61;
       const beaten = game.defeated[b.id];
       ctx.globalAlpha = beaten ? 0.95 : 0.55;
-      A.portrait(ctx, G.images[b.id], x, 408, 54, 54, { bg: b.colors.dark, t: T });
+      A.portrait(ctx, G.images[b.id], x, 408, 48, 52, { bg: b.colors.dark, t: T });
       ctx.globalAlpha = 1;
-      A.text(ctx, b.name.length > 7 ? b.name.slice(0, 6) + '…' : b.name, x + 27, 476, { size: 8, color: beaten ? b.colors.light : '#8790bb', align: 'center' });
-      if (beaten) A.text(ctx, game.spared[b.id] ? '♥' : '×', x + 48, 418, { size: 12, color: game.spared[b.id] ? '#8affc8' : '#ff8fb8', align: 'center' });
+      A.text(ctx, b.name.length > 6 ? b.name.slice(0, 5) + '…' : b.name, x + 24, 476, { size: 8, color: beaten ? b.colors.light : '#8790bb', align: 'center' });
+      if (beaten) A.text(ctx, game.spared[b.id] ? '♥' : '×', x + 43, 418, { size: 11, color: game.spared[b.id] ? '#8affc8' : '#ff8fb8', align: 'center' });
     });
     A.text(ctx, Object.keys(ROOMS).length + ' МЕСТ · ' + (G.QUESTS || []).length + ' КВЕСТОВ · ' + BOSSES.length + ' БОССОВ ПО 3 ФАЗЫ · ГАЛЬКЕ 59', 320, 158, { size: 10, color: '#8e98c6', align: 'center' });
   }
@@ -2398,8 +2434,9 @@
         AU.ensure(); AU.sfx('select');
         const o = opts[titleIndex];
         if (o.indexOf('СКИН') === 0) {
-          setSkin(skinIndex + 1);
-          AU.sfx('move');
+          const changed = setSkin(skinIndex + 1);
+          AU.sfx(changed ? 'select' : 'move');
+          if (!changed && lockedSkinNames().length) showToast('Убей Машу и Пастуха — откроешь их скины. Пощада не считается.');
           clearPressed();
           return;
         }
@@ -2516,6 +2553,7 @@
 
   G.debug = {
     game, startBattle, bossById, questFoeFor, questBossById, npcTalk, enterRoom, getState: () => state, say, makeBattle, buildSchedule,
+    startNewGame: newGame,
     netSnap: () => netSnap,
     netInfo: () => ({
       mode: netMode, selfIndex: netSelfIndex,
@@ -2534,6 +2572,9 @@
     spare: () => { if (game.battle) victory(game.battle, 'spare'); },
     enemyAttack: () => { if (game.battle) enemyAttack(); },
     heroSkin: () => G.heroSkin(),
-    setHeroSkin: setSkin
+    setHeroSkin: setSkin,
+    isSkinUnlocked,
+    unlockSkinForBoss,
+    lockedSkinNames
   };
 })(window.GALKA = window.GALKA || {});
