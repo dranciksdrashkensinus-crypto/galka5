@@ -321,6 +321,7 @@ body.touch-mode .touch-help { display: inline; }
 }
 .acc-note { color: #8e98c6; font-size: 11px; line-height: 1.4; }
 .acc-note.bad { color: #ff8fb8; }
+.acc-note.beta-note { color: #ffd98a; border: 1px solid #6b5a2e; background: rgba(80,58,12,.28); padding: 7px 9px; margin: 8px 0; }
 .acc-list { max-height: 44vh; overflow: auto; border: 1px solid #41486f; background: rgba(6,8,20,.6); }
 .top-row, .admin-row { padding: 8px 10px; border-bottom: 1px solid #2b3152; }
 .top-row b { color: #ffe6a0; }
@@ -330,6 +331,7 @@ body.touch-mode .touch-help { display: inline; }
 .admin-progress { color: #aab3dd; font-size: 11px; margin-top: 3px; }
 .admin-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
 .admin-actions button { padding: 5px 7px; font-size: 10px; }
+.admin-actions button.danger { color: #ff9ab5; border-color: #7a2f48; }
 .acc-empty { padding: 18px; text-align: center; color: #ff9ec0; line-height: 1.6; }
 .admin-message {
   position: fixed;

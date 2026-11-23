@@ -14,7 +14,7 @@
   let bannerTimer = null;
   let nextMessageAt = 0;
   let lastRender = 0;
-  const shared = { users: {}, msgs: {} };
+  const shared = { users: {}, msgs: {}, deleted: {} };
 
   function read(key, fallback) {
     try {
@@ -95,6 +95,7 @@
     Object.keys(shared.users).forEach(n => { names[n] = 1; });
     const out = {};
     Object.keys(names).forEach(n => {
+      if (shared.deleted[n]) return; // удалён админкой — больше не существует
       const l = local[n] || {};
       const s = shared.users[n] || {};
       const p = s.profile || {};
@@ -398,6 +399,7 @@
         '    <button data-action="ban1h" data-nick="' + esc(n) + '">БАН 1Ч</button>',
         '    <button data-action="unban" data-nick="' + esc(n) + '">РАЗБАН</button>',
         '    <button data-action="send" data-nick="' + esc(n) + '">ТЕКСТ</button>',
+        n === admin ? '' : '    <button data-action="delete" data-nick="' + esc(n) + '" class="danger">УДАЛИТЬ</button>',
         '  </div>',
         '</div>'
       ].join('');
@@ -410,6 +412,26 @@
     const obj = Object.assign({}, all[nick]);
     fn(obj);
     writeProfile(nick, obj);
+    renderAdmin();
+  }
+
+  /* Админ может удалить любой чужой аккаунт. Свой — никогда.
+     «Могила» рассылается retain-сообщением, поэтому удалённый игрок на всех
+     устройствах разлогинивается и не может заново записать свой профиль. */
+  function deleteAccount(nick) {
+    if (!isAdmin()) return msg('Только админ может удалять аккаунты.', true);
+    if (!nick || nick === ((session() || {}).nick)) return msg('Нельзя удалить свой аккаунт.', true);
+    const stamp = { deleted: true, at: Date.now(), by: ((session() || {}).nick) || '' };
+    const local = read(USERS_KEY, {});
+    delete local[nick];
+    write(USERS_KEY, local);
+    delete shared.users[nick];
+    shared.deleted[nick] = stamp.at;
+    send('accounts/user/' + nick + '/profile', stamp, true);
+    send('accounts/user/' + nick + '/stats', null, true);
+    send('accounts/user/' + nick + '/live', null, true);
+    if (current() && current().nick === nick) doLogout();
+    msg('АККАУНТ УДАЛЁН: ' + nick);
     renderAdmin();
   }
 
@@ -427,6 +449,10 @@
         msg('Нельзя забанить самого себя.', true);
         return;
       }
+      if (act === 'delete' && nick === ((session() || {}).nick)) {
+        msg('Нельзя удалить свой аккаунт.', true);
+        return;
+      }
       if (act === 'close') close();
       else if (act === 'register') doRegister();
       else if (act === 'login') doLogin();
@@ -435,6 +461,7 @@
       else if (act === 'ban') mutate(nick, x => { x.banUntil = -1; x.online = false; });
       else if (act === 'ban1h') mutate(nick, x => { x.banUntil = Date.now() + 3600000; });
       else if (act === 'unban') mutate(nick, x => { x.banUntil = 0; });
+      else if (act === 'delete') deleteAccount(nick);
       else if (act === 'send') {
         const inp = document.getElementById('adminText');
         const text = (inp && inp.value || '').trim();
@@ -520,6 +547,21 @@
       try { val = d.payload ? JSON.parse(d.payload) : null; } catch (e) { val = null; }
       if (parts[0] === 'accounts' && parts[1] === 'user' && parts.length >= 4) {
         const nick = parts[2], kind = parts[3];
+        if (kind === 'profile' && val && val.deleted) {
+          shared.deleted[nick] = val.at || Date.now();
+          delete shared.users[nick];
+          const local = read(USERS_KEY, {});
+          delete local[nick];
+          write(USERS_KEY, local);
+          const s = session();
+          if (s && s.nick === nick) {
+            saveSession(null);
+            showBanner('АККАУНТ УДАЛЁН АДМИНИСТРАТОРОМ. ЗАРЕГИСТРИРУЙСЯ ЗАНОВО.');
+          }
+          afterChange();
+          return;
+        }
+        if (kind === 'profile' && shared.deleted[nick] && !(val && val.created > shared.deleted[nick])) return;
         shared.users[nick] = shared.users[nick] || {};
         shared.users[nick][kind] = val;
         const rec = shared.users[nick];
@@ -557,7 +599,7 @@
 
   G.accounts = {
     open, close, isOpen, tick, recordCompletion, updateLive,
-    isAdmin, current, users,
+    isAdmin, current, users, deleteAccount,
     hideAdminTab: () => { const t = document.getElementById('accAdminTab'); if (t) t.classList.add('hidden'); }
   };
 })(window.GALKA = window.GALKA || {});
