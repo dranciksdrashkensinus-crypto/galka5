@@ -245,6 +245,7 @@
   let netInputs = {};          // id -> { v:{x,y,mag}, z:bool, x:bool }
   let netSnap = null;          // latest host snapshot on clients
   let netSendT = 0, netStateT = 0;
+  let netDialogueSig = '', netDialogueDismissed = '';
   function netSelfColor() { return NET_COLORS[netSelfIndex % NET_COLORS.length]; }
   function netInputFor(i) {
     const p = netPlayers[i];
@@ -352,6 +353,7 @@
   function applyNetSnapshot(dt) {
     const s = netSnap;
     if (!s) return;
+    const roomChanged = ROOMS[s.roomId] && s.roomId !== game.roomId;
     state = s.state || 'world';
     game.roomId = ROOMS[s.roomId] ? s.roomId : 'home';
     game.hp = s.hp; game.maxHp = s.maxHp; game.lov = s.lov; game.exp = s.exp || 0;
@@ -359,27 +361,57 @@
     game.inv = Object.assign({ pie: 0, tea: 0, candy: 0 }, s.inv);
     game.flags = s.flags || {}; game.defeated = s.defeated || {}; game.spared = s.spared || {};
     game.questsDone = s.questsDone || 0; game.startedAt = s.startedAt || Date.now();
-    if (s.player) Object.assign(game.player, s.player);
+    if (roomChanged) {
+      game.dialogue = null;
+      netDialogueSig = ''; netDialogueDismissed = '';
+      game.player.frame = 0; game.player.walkT = 0;
+      AU.setTrack(ROOMS[game.roomId].track);
+    }
+    /* s.player is the HOST. The guest's own soul is its entry in s.peers. */
+    if (s.player && netPlayers[0]) {
+      netPlayers[0].x = s.player.x;
+      netPlayers[0].y = s.player.y;
+    }
+    const ownPeer = s.peers && s.peers[netSelfIndex];
+    if (ownPeer) {
+      if (roomChanged) {
+        game.player.x = ownPeer.x; game.player.y = ownPeer.y;
+      } else {
+        const k = Math.min(1, dt * 5);
+        game.player.x += (ownPeer.x - game.player.x) * k;
+        game.player.y += (ownPeer.y - game.player.y) * k;
+      }
+    }
     (s.peers || []).forEach((p, i) => {
-      if (!netPlayers[i]) return;
-      const target = i === 0 ? null : netPlayers[i];
+      if (i === 0) return;
+      const target = netPlayers[i];
       if (!target) return;
-      const k = Math.min(1, dt * 14);
+      if (netMode === 'client' && i === netSelfIndex) return;
+      const k = roomChanged ? 1 : Math.min(1, dt * 14);
       target.x += (p.x - target.x) * k;
       target.y += (p.y - target.y) * k;
     });
     if (s.toast) toast = { text: s.toast, time: 1.8 };
 
     if (s.dialogue) {
-      if (!game.dialogue || game.dialogue.sig !== JSON.stringify([s.dialogue.lines, s.dialogue.i])) {
-        game.dialogue = new Dialog(s.dialogue.speaker, s.dialogue.lines, null);
-        game.dialogue.sig = JSON.stringify([s.dialogue.lines, s.dialogue.i]);
-        game.dialogue.npcName = s.dialogue.npcName || '';
-        if (s.dialogue.imgKey && G.images[s.dialogue.imgKey]) game.dialogue.img = G.images[s.dialogue.imgKey];
+      const sig = JSON.stringify([s.dialogue.speaker, s.dialogue.lines, s.dialogue.i]);
+      if (sig !== netDialogueSig) { netDialogueSig = sig; netDialogueDismissed = ''; }
+      if (netDialogueDismissed === sig) {
+        game.dialogue = null;
+      } else {
+        if (!game.dialogue || game.dialogue.sig !== sig) {
+          game.dialogue = new Dialog(s.dialogue.speaker, s.dialogue.lines, null);
+          game.dialogue.sig = sig;
+          game.dialogue.npcName = s.dialogue.npcName || '';
+          if (s.dialogue.imgKey && G.images[s.dialogue.imgKey]) game.dialogue.img = G.images[s.dialogue.imgKey];
+        }
+        game.dialogue.i = s.dialogue.i || 0;
+        game.dialogue.chars = s.dialogue.chars || 0;
       }
-      game.dialogue.i = s.dialogue.i || 0;
-      game.dialogue.chars = s.dialogue.chars || 0;
-    } else game.dialogue = null;
+    } else {
+      game.dialogue = null;
+      netDialogueSig = ''; netDialogueDismissed = '';
+    }
 
     if (s.battle) {
       const boss = bossById(s.battle.bossId) || questBossById(s.battle.bossId, s.battle.questId) || BOSSES[0];
@@ -390,18 +422,66 @@
         enemyHp: s.battle.enemyHp, enemyMax: s.battle.enemyMax, phaseIdx: s.battle.phaseIdx || 0,
         attackName: s.battle.attackName, spareReady: !!s.battle.spareReady, winType: s.battle.winType,
         menuIndex: s.battle.menuIndex || 0, sub: s.battle.sub, subIndex: s.battle.subIndex || 0,
-        hx: s.battle.hx, hy: s.battle.hy, h2x: s.battle.h2x, h2y: s.battle.h2y,
+        hx: s.battle.hx, hy: s.battle.hy,
         invuln: s.battle.invuln, h2Invuln: s.battle.h2Invuln,
         dash: s.battle.dash, h2Dash: s.battle.h2Dash, campMsg: s.battle.campMsg || 0
       });
+      if (netMode === 'client' && netSelfIndex === 1) {
+        const k = Math.min(1, dt * 6);
+        if (s.battle.h2x != null) b.h2x += (s.battle.h2x - b.h2x) * k;
+        if (s.battle.h2y != null) b.h2y += (s.battle.h2y - b.h2y) * k;
+      } else {
+        b.h2x = s.battle.h2x; b.h2y = s.battle.h2y;
+      }
       b.bullets = (s.battle.bullets || []).map(p => Object.assign({ age: 0, vx: 0, vy: 0, r: 5, color: '#fff', shape: 'circle', rot: 0 }, p));
       b.warns = (s.battle.warns || []).map(w => Object.assign({ life: 0, max: 1, color: '#ff5d7d' }, w));
-      b.netSouls = (s.battle.souls || []).map((q, i) => ({
-        i: i + 2, color: NET_COLORS[(i + 2) % NET_COLORS.length],
-        x: q.x, y: q.y, invuln: q.invuln, dash: q.dash, dashCd: 0
-      }));
+      b.netSouls = (s.battle.souls || []).map((q, i) => {
+        const old = (b.netSouls || [])[i];
+        const own = netMode === 'client' && netSelfIndex === i + 2;
+        return {
+          i: i + 2, color: NET_COLORS[(i + 2) % NET_COLORS.length],
+          x: own && old ? old.x + (q.x - old.x) * Math.min(1, dt * 6) : q.x,
+          y: own && old ? old.y + (q.y - old.y) * Math.min(1, dt * 6) : q.y,
+          invuln: q.invuln, dash: q.dash, dashCd: 0
+        };
+      });
       b.phase2 = b.phaseIdx >= 1; b.phase3 = b.phaseIdx >= 2;
     } else game.battle = null;
+  }
+
+  /* Clients move themselves immediately and let the host's snapshot gently
+     correct them. Without this the guest's own soul lags a full round trip
+     through the public broker and feels almost uncontrollable. */
+  function predictLocalPlayer(dt) {
+    if (state !== 'world' || game.fade) return;
+    /* A host dialogue is only text on the guest — it must never freeze them. */
+    const mv = moveInput();
+    if (mv.mag > 0) {
+      if (Math.abs(mv.vx) > Math.abs(mv.vy)) game.player.dir = mv.vx < 0 ? 'left' : 'right';
+      else game.player.dir = mv.vy < 0 ? 'up' : 'down';
+      game.player.walkT += dt * 9 * mv.mag;
+      game.player.frame = 1 + Math.floor(game.player.walkT) % 2;
+      movePlayer(mv.vx * 132 * dt * mv.mag, mv.vy * 132 * dt * mv.mag);
+    } else game.player.frame = 0;
+  }
+
+  function predictBattleSoul(dt) {
+    const b = game.battle;
+    if (!b || b.phase !== 'dodge' || game.dialogue || !b.arena) return;
+    const A0 = b.arena, mv = moveInput();
+    if (!mv.mag) return;
+    if (netSelfIndex === 1) {
+      const sp = (b.h2Dash > 0 ? 430 : 168) * dt * mv.mag;
+      b.h2x = Math.max(A0.x + 12, Math.min(A0.x + A0.w - 12, b.h2x + mv.vx * sp));
+      b.h2y = Math.max(A0.y + 12, Math.min(A0.y + A0.h - 12, b.h2y + mv.vy * sp));
+    } else if (netSelfIndex >= 2 && b.netSouls) {
+      const s = b.netSouls[netSelfIndex - 2];
+      if (s) {
+        const sp = (s.dash > 0 ? 430 : 168) * dt * mv.mag;
+        s.x = Math.max(A0.x + 12, Math.min(A0.x + A0.w - 12, s.x + mv.vx * sp));
+        s.y = Math.max(A0.y + 12, Math.min(A0.y + A0.h - 12, s.y + mv.vy * sp));
+      }
+    }
   }
 
   function snapshot() {
@@ -465,6 +545,15 @@
       game.player.frame = 0; game.player.walkT = 0;
       game.dialogue = null;
       AU.setTrack(r.track);
+      /* Guests must appear at the new room's entrance too, not keep the
+         coordinates they had in the previous room. */
+      if (netMode === 'host' && netPlayers.length > 1) {
+        netPlayers.forEach((q, i) => {
+          if (i === 0) return;
+          q.x = Math.max(24, Math.min(W - 24, spawn.x + 36 * i));
+          q.y = spawn.y;
+        });
+      }
       maybeSmartEncounter(id);
     };
     if (instant) doIt();
@@ -780,6 +869,23 @@
 
   function updateOverworld(dt) {
     const p = game.player, room = ROOMS[game.roomId];
+    /* Guests keep walking even while the host is reading a dialogue. */
+    if (netMode === 'host' && netPlayers.length > 1 && !game.fade) {
+      for (let i = 1; i < netPlayers.length; i++) {
+        const q = netPlayers[i], inp = netInputFor(i);
+        if (inp && inp.v && inp.v.mag > 0) {
+          const v = inp.v;
+          let nx = Math.max(14, Math.min(W - 14, q.x + v.x * 132 * dt * v.mag));
+          if (!solidAt(nx - 10, q.y - 6, 20, 12)) q.x = nx;
+          let ny = Math.max(30, Math.min(H - 16, q.y + v.y * 132 * dt * v.mag));
+          if (!solidAt(q.x - 10, ny - 6, 20, 12)) q.y = ny;
+        }
+        if (takeNetZ(i) && !game.dialogue) {
+          const n = nearestNpc(q.x, q.y);
+          if (n) { AU.sfx('select'); npcTalk(n); }
+        }
+      }
+    }
     if (!game.dialogue && !game.fade) {
       const mv = moveInput();
       const vx = mv.vx, vy = mv.vy;
@@ -790,23 +896,6 @@
         p.frame = 1 + Math.floor(p.walkT) % 2;
         movePlayer(vx * 132 * dt * mv.mag, vy * 132 * dt * mv.mag);
       } else p.frame = 0;
-
-      if (netMode === 'host' && netPlayers.length > 1) {
-        for (let i = 1; i < netPlayers.length; i++) {
-          const q = netPlayers[i], inp = netInputFor(i);
-          if (inp && inp.v && inp.v.mag > 0) {
-            const v = inp.v;
-            let nx = Math.max(14, Math.min(W - 14, q.x + v.x * 132 * dt * v.mag));
-            if (!solidAt(nx - 10, q.y - 6, 20, 12)) q.x = nx;
-            let ny = Math.max(30, Math.min(H - 16, q.y + v.y * 132 * dt * v.mag));
-            if (!solidAt(q.x - 10, ny - 6, 20, 12)) q.y = ny;
-          }
-          if (takeNetZ(i) && !game.dialogue) {
-            const n = nearestNpc(q.x, q.y);
-            if (n) { AU.sfx('select'); npcTalk(n); }
-          }
-        }
-      }
 
       for (const ex of room.exits) {
         if (p.x > ex.x && p.x < ex.x + ex.w && p.y > ex.y && p.y < ex.y + ex.h) {
@@ -934,7 +1023,7 @@
         size: 9, color: netSelfColor(), align: 'center', shadow: false
       });
       netPlayers.forEach((q, i) => {
-        if (i === 0) return;
+        if (i === 0 || (netMode === 'client' && i === netSelfIndex)) return;
         A.drawChar(ctx, G.images.heroine, q.x, q.y + 16, 0, {
           width: 40, height: 52, legH: 13,
           legColor: i === 1 ? '#3a2a58' : '#243a52', bootColor: '#1b1630', outline: q.color
@@ -2089,7 +2178,7 @@
 
     if (netMode) {
       netSendT += dt;
-      if (netSendT >= 0.07) {
+      if (netSendT >= 0.04) {
         netSendT = 0;
         const mv = moveInput();
         G.net.sendInput({ v: { x: mv.vx, y: mv.vy, mag: mv.mag }, z: !!pressed.z, x: !!pressed.x });
@@ -2097,6 +2186,14 @@
     }
 
     if (netMode === 'client') {
+      /* The guest may close the host's text box locally; the host keeps theirs. */
+      if (game.dialogue && (pressed.z || pressed.x)) {
+        netDialogueDismissed = netDialogueSig;
+        game.dialogue = null;
+        AU.sfx('select');
+      }
+      predictLocalPlayer(dt);
+      predictBattleSoul(dt);
       applyNetSnapshot(dt);
       updateParticles(dt);
       clearPressed();
@@ -2148,7 +2245,7 @@
 
     if (netMode === 'host') {
       netStateT += dt;
-      if (netStateT >= 0.08) {
+      if (netStateT >= 0.05) {
         netStateT = 0;
         G.net.sendState(netSnapshot());
       }

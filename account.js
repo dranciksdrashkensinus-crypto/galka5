@@ -36,6 +36,22 @@
     N.whenReady(ok => { if (ok) N.send(topic, obj, retain); });
   }
 
+  /* Retained messages can be lost or overwritten. Every client periodically
+     republishes its own record, and opening the tops tab asks everyone to
+     do it right away — so progress is visible on all devices. */
+  function publishMine() {
+    if (!online()) return;
+    const u = current();
+    if (!u) return;
+    send('accounts/user/' + u.nick + '/profile', profileOf(u.nick, u), true);
+    send('accounts/user/' + u.nick + '/stats', Object.assign({ completions: 0, bestMs: 0 }, u.stats || {}), true);
+    if (u.live) send('accounts/user/' + u.nick + '/live', u.live, true);
+  }
+  function requestSync() {
+    if (!online()) return;
+    send('accounts/sync/request', { at: Date.now() }, false);
+  }
+
   function hash(s) {
     let h = 2166136261;
     for (let i = 0; i < s.length; i++) {
@@ -252,13 +268,14 @@
     overlay.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
     overlay.querySelectorAll('.acc-panel').forEach(p => p.classList.toggle('hidden', p.dataset.panel !== tab));
     msg('');
-    if (tab === 'tops') renderTops();
+    if (tab === 'tops') { requestSync(); renderTops(); }
     if (tab === 'admin') renderAdmin();
   }
   function isOpen() { return !!(overlay && !overlay.classList.contains('hidden')); }
   function open() {
     if (!overlay) return;
     build();
+    requestSync();
     overlay.classList.remove('hidden');
     const tab = document.getElementById('accAdminTab');
     if (tab) tab.classList.toggle('hidden', !isAdmin());
@@ -295,6 +312,8 @@
     writeStats(nick, { completions: 0, bestMs: 0 });
     writeLive(nick, { online: true, at: created, room: '', quests: 0, max: 0, bosses: 0, hp: 0 });
     saveSession({ nick, loginAt: created });
+    publishMine();
+    requestSync();
     document.getElementById('regPass').value = '';
     document.getElementById('regPass2').value = '';
     const tab = document.getElementById('accAdminTab');
@@ -318,6 +337,8 @@
     const old = user.live || {};
     writeLive(nick, Object.assign({}, old, { online: true, at: Date.now() }));
     saveSession({ nick, loginAt: Date.now() });
+    publishMine();
+    requestSync();
     document.getElementById('loginPass').value = '';
     const tab = document.getElementById('accAdminTab');
     if (tab) tab.classList.toggle('hidden', !isAdmin());
@@ -398,7 +419,7 @@
       const tabBtn = e.target.closest('[data-tab]');
       if (tabBtn) { setTab(tabBtn.dataset.tab); return; }
       const topBtn = e.target.closest('[data-top]');
-      if (topBtn) { topTab = topBtn.dataset.top; renderTops(); return; }
+      if (topBtn) { topTab = topBtn.dataset.top; requestSync(); renderTops(); return; }
       const btn = e.target.closest('[data-action]');
       if (!btn) return;
       const act = btn.dataset.action, nick = btn.dataset.nick;
@@ -509,6 +530,8 @@
         shared.msgs[nick] = shared.msgs[nick] || {};
         if (val) shared.msgs[nick][id] = val; else delete shared.msgs[nick][id];
         afterChange();
+      } else if (parts[0] === 'accounts' && parts[1] === 'sync' && parts[2] === 'request') {
+        publishMine();
       }
     });
     G.net.on('status', updateNetBadge);
@@ -516,6 +539,11 @@
       if (!ok) return;
       G.net.listen('accounts/user/+/#');
       G.net.listen('accounts/msg/+/#');
+      G.net.listen('accounts/sync/#');
+      publishMine();
+      requestSync();
+      setInterval(() => { publishMine(); }, 15000);
+      setInterval(() => { requestSync(); }, 30000);
       updateNetBadge();
     });
   }
