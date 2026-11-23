@@ -1500,21 +1500,35 @@
     /* 9999 HP must not mean "immortal": normal bosses still take ~5 hits. */
     return game.godRuns > 0 ? Math.max(base, Math.round(game.maxHp * 0.22)) : base;
   }
+  const SMART_SPARES = 3;
   function smartSpare(b) {
-    /* He deliberately leaves her standing so the 9999-HP grind can continue.
-       Only his own duel does this — no other boss ever revives her. */
+    /* He can hold back ONLY three times. Every spare costs HIM a third of his
+       HP, so on the third one he collapses — no infinite healing. */
     b.smartSpared = (b.smartSpared || 0) + 1;
     game.hp = Math.max(1, Math.round(game.maxHp * 0.25));
     b.invuln = 1.4;
     b.flash = 0.8;
     game.flags.smartLost = true;
     game.flags.qstart_q1 = true;
+    const drain = Math.ceil(b.enemyMax / SMART_SPARES);
+    b.enemyHp = Math.max(0, b.enemyHp - drain);
+    b.popups.push({ x: 430, y: 178, text: 'ОН ПОТРАТИЛ -' + drain + ' HP', life: 1.4, color: '#ffe680' });
     AU.sfx('spare');
-    showToast('✦ ОН УДЕРЖАЛ ПОСЛЕДНИЙ УДАР: ' + b.smartSpared + '. У ТЕБЯ ' + game.hp + ' HP — БЕЙ ЕЩЁ.');
+    if (b.enemyHp <= 0 || b.smartSpared >= SMART_SPARES) {
+      b.smartDone = true;
+      b.bullets = [];
+      showToast('✦ ХВАТИТ. ОН ВЫДОХСЯ — ТЫ ПОБЕДИЛА.');
+      victory(b, 'kill');
+      return;
+    }
+    showToast('✦ ПОЩАДА ' + b.smartSpared + '/' + SMART_SPARES + ' · У НЕГО ' + Math.ceil(b.enemyHp) + ' HP. ЕЩЁ УДАР МОЖЕТ УБИТЬ.');
   }
   function fatalHit(b) {
     if (game.hp > 0) return false;
-    if (isSmartBoss(b.boss)) { smartSpare(b); return false; }
+    if (isSmartBoss(b.boss) && !b.smartDone) {
+      smartSpare(b);
+      return !!b.smartDone; // after the third spare the fight is already over
+    }
     game.hp = 0;
     state = 'gameover';
     AU.setTrack('title');
