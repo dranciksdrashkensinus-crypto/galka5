@@ -1491,14 +1491,20 @@
     return list;
   }
 
-  /* Nobody revives Галька any more. The smart man hits for the whole bar,
-     so with his 9999 HP he is effectively unbeatable — as requested. */
+  /* The smart man hits for the whole bar. In the FIRST duel that triggers his
+     one-time scripted mercy (the 50 quests); everywhere else it is a real KO. */
   function playerHitDamage(b) {
     if (isSmartBoss(b.boss)) return game.maxHp + 1;
     return Math.max(1, Math.round(b.boss.atk * (game.spared[b.boss.id] ? 0.5 : 0.85)));
   }
   function fatalHit(b) {
     if (game.hp > 0) return false;
+    /* First duel only: he wins, spares Галька and gives the 50 quests.
+       The flag is set inside questDefeat, so this can never repeat. */
+    if (isSmartBoss(b.boss) && !b.boss.rematch && !game.flags.smartLost) {
+      questDefeat(b);
+      return true;
+    }
     game.hp = 0;
     state = 'gameover';
     AU.setTrack('title');
@@ -1563,16 +1569,20 @@
   function questDefeat(b) {
     b.phase = 'victory';
     b.winType = 'lost';
+    b.bullets = [];
+    b.invuln = 1.4;
+    /* He stops at the last second. One hit of life left — no healing loop,
+       no 9999 HP, no super damage. The list is the only reward. */
+    game.hp = 1;
     AU.sfx('hurt');
     sayBattle(b.boss.lose || [{ who: 'sys', text: 'Ты проиграла.' }], () => {
       game.flags.smartLost = true;
-      game.flags.smartMaster = true;
       game.flags.qstart_q1 = true;
       saveGame();
       game.battle = null;
       state = 'world';
       enterRoom(game.roomId, { x: 320, y: 340 }, true);
-      showToast('✦ УМНЫЙ МУЖЧИНА ПОЩАДИЛ ТЕБЯ. Начни со списка.');
+      showToast('✦ УМНЫЙ МУЖЧИНА ПОЩАДИЛ ТЕБЯ. ВОЗЬМИ СПИСОК ИЗ 50 ДЕЛ.');
     });
   }
 
@@ -2280,7 +2290,6 @@
       if (beaten) A.text(ctx, game.spared[b.id] ? '♥' : '×', x + 56, 397, { size: 14, color: game.spared[b.id] ? '#8affc8' : '#ff8fb8', align: 'center' });
     });
     A.text(ctx, Object.keys(ROOMS).length + ' МЕСТ · ' + (G.QUESTS || []).length + ' КВЕСТОВ · 5 БОССОВ ПО 3 ФАЗЫ · ГАЛЬКЕ 59', 320, 158, { size: 10, color: '#8e98c6', align: 'center' });
-    A.text(ctx, 'СБОРКА j · У УМНОГО 9999 HP, ПОЩАДЫ НЕТ · 9999 HP И БОЛЬШОГО УРОНА У ТЕБЯ НЕТ', 320, 176, { size: 9, color: '#ffd98a', align: 'center', shadow: false });
   }
 
   function drawGameOver() {
