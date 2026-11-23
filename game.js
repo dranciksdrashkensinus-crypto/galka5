@@ -244,6 +244,7 @@
   let netSelfIndex = 0;
   let netInputs = {};          // id -> { v:{x,y,mag}, z:bool, x:bool }
   let netSnap = null;          // latest host snapshot on clients
+  let netLastSnapRef = null;   // only correct positions when a NEW snapshot arrives
   let netSendT = 0, netStateT = 0;
   let netDialogueSig = '', netDialogueDismissed = '';
   function netSelfColor() { return NET_COLORS[netSelfIndex % NET_COLORS.length]; }
@@ -297,6 +298,7 @@
     netMode = role === 'host' ? 'host' : 'client';
     netInputs = {};
     netSnap = null;
+    netLastSnapRef = null;
     netSendT = netStateT = 0;
     netPlayers = ((startData && startData.players) || []).map((p, i) => ({
       id: p.id, nick: p.nick || 'ИГРОК', color: NET_COLORS[i % NET_COLORS.length],
@@ -353,6 +355,11 @@
   function applyNetSnapshot(dt) {
     const s = netSnap;
     if (!s) return;
+    /* This function runs every frame, but the snapshot itself only changes
+       when a broker message arrives. Correcting toward the SAME stale packet
+       every frame is what made guests feel rubber-banded into a tiny circle. */
+    const fresh = s !== netLastSnapRef;
+    if (fresh) netLastSnapRef = s;
     const roomChanged = ROOMS[s.roomId] && s.roomId !== game.roomId;
     state = s.state || 'world';
     game.roomId = ROOMS[s.roomId] ? s.roomId : 'home';
@@ -373,21 +380,22 @@
       netPlayers[0].y = s.player.y;
     }
     const ownPeer = s.peers && s.peers[netSelfIndex];
-    if (ownPeer) {
+    if (ownPeer && (fresh || roomChanged)) {
       if (roomChanged) {
         game.player.x = ownPeer.x; game.player.y = ownPeer.y;
       } else {
-        const k = Math.min(1, dt * 5);
+        /* A small nudge once per packet, not every frame. */
+        const k = 0.18;
         game.player.x += (ownPeer.x - game.player.x) * k;
         game.player.y += (ownPeer.y - game.player.y) * k;
       }
     }
-    (s.peers || []).forEach((p, i) => {
-      if (i === 0) return;
+    if (fresh || roomChanged) (s.peers || []).forEach((p, i) => {
       const target = netPlayers[i];
       if (!target) return;
-      if (netMode === 'client' && i === netSelfIndex) return;
-      const k = roomChanged ? 1 : Math.min(1, dt * 14);
+      if (netMode === 'host' && i === 0) return;  // host is s.player
+      if (netMode === 'client' && i === netSelfIndex) return; // own soul
+      const k = roomChanged ? 1 : 0.35;
       target.x += (p.x - target.x) * k;
       target.y += (p.y - target.y) * k;
     });
@@ -427,24 +435,28 @@
         dash: s.battle.dash, h2Dash: s.battle.h2Dash, campMsg: s.battle.campMsg || 0
       });
       if (netMode === 'client' && netSelfIndex === 1) {
-        const k = Math.min(1, dt * 6);
-        if (s.battle.h2x != null) b.h2x += (s.battle.h2x - b.h2x) * k;
-        if (s.battle.h2y != null) b.h2y += (s.battle.h2y - b.h2y) * k;
-      } else {
+        if (fresh) {
+          const k = 0.2;
+          if (s.battle.h2x != null) b.h2x += (s.battle.h2x - b.h2x) * k;
+          if (s.battle.h2y != null) b.h2y += (s.battle.h2y - b.h2y) * k;
+        }
+      } else if (fresh) {
         b.h2x = s.battle.h2x; b.h2y = s.battle.h2y;
       }
-      b.bullets = (s.battle.bullets || []).map(p => Object.assign({ age: 0, vx: 0, vy: 0, r: 5, color: '#fff', shape: 'circle', rot: 0 }, p));
-      b.warns = (s.battle.warns || []).map(w => Object.assign({ life: 0, max: 1, color: '#ff5d7d' }, w));
-      b.netSouls = (s.battle.souls || []).map((q, i) => {
-        const old = (b.netSouls || [])[i];
-        const own = netMode === 'client' && netSelfIndex === i + 2;
-        return {
-          i: i + 2, color: NET_COLORS[(i + 2) % NET_COLORS.length],
-          x: own && old ? old.x + (q.x - old.x) * Math.min(1, dt * 6) : q.x,
-          y: own && old ? old.y + (q.y - old.y) * Math.min(1, dt * 6) : q.y,
-          invuln: q.invuln, dash: q.dash, dashCd: 0
-        };
-      });
+      if (fresh) {
+        b.bullets = (s.battle.bullets || []).map(p => Object.assign({ age: 0, vx: 0, vy: 0, r: 5, color: '#fff', shape: 'circle', rot: 0 }, p));
+        b.warns = (s.battle.warns || []).map(w => Object.assign({ life: 0, max: 1, color: '#ff5d7d' }, w));
+        b.netSouls = (s.battle.souls || []).map((q, i) => {
+          const old = (b.netSouls || [])[i];
+          const own = netMode === 'client' && netSelfIndex === i + 2;
+          return {
+            i: i + 2, color: NET_COLORS[(i + 2) % NET_COLORS.length],
+            x: own && old ? old.x + (q.x - old.x) * 0.2 : q.x,
+            y: own && old ? old.y + (q.y - old.y) * 0.2 : q.y,
+            invuln: q.invuln, dash: q.dash, dashCd: 0
+          };
+        });
+      }
       b.phase2 = b.phaseIdx >= 1; b.phase3 = b.phaseIdx >= 2;
     } else game.battle = null;
   }
@@ -1023,7 +1035,9 @@
         size: 9, color: netSelfColor(), align: 'center', shadow: false
       });
       netPlayers.forEach((q, i) => {
-        if (i === 0 || (netMode === 'client' && i === netSelfIndex)) return;
+        /* On a guest, index 0 is the HOST and must be drawn.
+           Only hide index 0 on the host (that's their own soul). */
+        if ((netMode === 'host' && i === 0) || (netMode === 'client' && i === netSelfIndex)) return;
         A.drawChar(ctx, G.images.heroine, q.x, q.y + 16, 0, {
           width: 40, height: 52, legH: 13,
           legColor: i === 1 ? '#3a2a58' : '#243a52', bootColor: '#1b1630', outline: q.color
@@ -2307,7 +2321,7 @@
   G.net.on('input', d => { netInputs[d.id] = d.data; });
   G.net.on('state', s => { netSnap = s; });
   G.net.on('left', () => {
-    netMode = ''; netPlayers = []; netInputs = {}; netSnap = null;
+    netMode = ''; netPlayers = []; netInputs = {}; netSnap = null; netLastSnapRef = null;
   });
 
   G.debug = {
