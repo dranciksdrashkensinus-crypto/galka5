@@ -301,8 +301,7 @@
     player: { x: 320, y: 410, dir: 'down', frame: 0, walkT: 0 },
     dialogue: null, battle: null, particles: [], fade: null,
     messageTime: 0, message: '',
-    questsDone: 0, startedAt: 0,
-    godRuns: 0, godBaseMaxHp: 0
+    questsDone: 0, startedAt: 0
   };
 
   function newGame() {
@@ -312,7 +311,6 @@
     game.inv = { pie: 2, tea: 1, candy: 3 };
     game.flags = {}; game.defeated = {}; game.spared = {};
     game.questsDone = 0; game.startedAt = Date.now();
-    game.godRuns = 0; game.godBaseMaxHp = 0;
     game.player = { x: 320, y: 410, dir: 'down', frame: 0, walkT: 0 };
     game.dialogue = null; game.battle = null; game.particles = []; game.fade = null;
     AU.setTrack('home');
@@ -352,7 +350,6 @@
       hp: game.hp, maxHp: game.maxHp, lov: game.lov, exp: game.exp,
       kills: game.kills, spares: game.spares,
       questsDone: game.questsDone, startedAt: game.startedAt,
-      godRuns: game.godRuns, godBaseMaxHp: game.godBaseMaxHp,
       player: { x: game.player.x, y: game.player.y, dir: game.player.dir, frame: game.player.frame },
       /* The host's own entry must carry the live player position too. */
       peers: netPlayers.map((p, i) => ({
@@ -421,7 +418,6 @@
     if (s.defeated) game.defeated = s.defeated;
     if (s.spared) game.spared = s.spared;
     game.questsDone = s.questsDone || 0; game.startedAt = s.startedAt || Date.now();
-    game.godRuns = s.godRuns || 0; game.godBaseMaxHp = s.godBaseMaxHp || 0;
     if (roomChanged) {
       game.dialogue = null;
       netDialogueSig = ''; netDialogueDismissed = '';
@@ -558,7 +554,6 @@
       flags: Object.assign({}, game.flags), defeated: Object.assign({}, game.defeated),
       spared: Object.assign({}, game.spared),
       questsDone: game.questsDone, startedAt: game.startedAt,
-      godRuns: game.godRuns, godBaseMaxHp: game.godBaseMaxHp,
       player: { x: game.player.x, y: game.player.y }
     };
   }
@@ -582,9 +577,14 @@
         kills: d.kills || 0, spares: d.spares || 0,
         inv: Object.assign({ pie: 0, tea: 0, candy: 0 }, d.inv),
         flags: d.flags || {}, defeated: d.defeated || {}, spared: d.spared || {},
-        questsDone: d.questsDone || 0, startedAt: d.startedAt || Date.now(),
-        godRuns: d.godRuns || 0, godBaseMaxHp: d.godBaseMaxHp || 0
+        questsDone: d.questsDone || 0, startedAt: d.startedAt || Date.now()
       });
+      /* Old saves still carry the removed "smart man" reward. Wipe it on load. */
+      const normalMax = 30 + 5 * BOSSES.filter(b => game.defeated[b.id]).length;
+      if ((d.godRuns || 0) > 0 || game.maxHp > normalMax) {
+        game.maxHp = normalMax;
+        game.hp = Math.min(game.hp, game.maxHp);
+      }
       game.hp = Math.max(1, Math.min(game.hp, game.maxHp));
       AU.setTrack(ROOMS[game.roomId].track);
       const savedPlayer = d.player || {};
@@ -1491,44 +1491,14 @@
     return list;
   }
 
-  /* The smart man is the ONLY boss who holds back at the last moment — that is
-     his story. Everyone else, including during the 3-run god-mode, can kill
-     Галька normally. */
+  /* Nobody revives Галька any more. The smart man hits for the whole bar,
+     so with his 9999 HP he is effectively unbeatable — as requested. */
   function playerHitDamage(b) {
     if (isSmartBoss(b.boss)) return game.maxHp + 1;
-    const base = Math.max(1, Math.round(b.boss.atk * (game.spared[b.boss.id] ? 0.5 : 0.85)));
-    /* 9999 HP must not mean "immortal": normal bosses still take ~5 hits. */
-    return game.godRuns > 0 ? Math.max(base, Math.round(game.maxHp * 0.22)) : base;
-  }
-  const SMART_SPARES = 3;
-  function smartSpare(b) {
-    /* He can hold back ONLY three times. Every spare costs HIM a third of his
-       HP, so on the third one he collapses — no infinite healing. */
-    b.smartSpared = (b.smartSpared || 0) + 1;
-    game.hp = Math.max(1, Math.round(game.maxHp * 0.25));
-    b.invuln = 1.4;
-    b.flash = 0.8;
-    game.flags.smartLost = true;
-    game.flags.qstart_q1 = true;
-    const drain = Math.ceil(b.enemyMax / SMART_SPARES);
-    b.enemyHp = Math.max(0, b.enemyHp - drain);
-    b.popups.push({ x: 430, y: 178, text: 'ОН ПОТРАТИЛ -' + drain + ' HP', life: 1.4, color: '#ffe680' });
-    AU.sfx('spare');
-    if (b.enemyHp <= 0 || b.smartSpared >= SMART_SPARES) {
-      b.smartDone = true;
-      b.bullets = [];
-      showToast('✦ ХВАТИТ. ОН ВЫДОХСЯ — ТЫ ПОБЕДИЛА.');
-      victory(b, 'kill');
-      return;
-    }
-    showToast('✦ ПОЩАДА ' + b.smartSpared + '/' + SMART_SPARES + ' · У НЕГО ' + Math.ceil(b.enemyHp) + ' HP. ЕЩЁ УДАР МОЖЕТ УБИТЬ.');
+    return Math.max(1, Math.round(b.boss.atk * (game.spared[b.boss.id] ? 0.5 : 0.85)));
   }
   function fatalHit(b) {
     if (game.hp > 0) return false;
-    if (isSmartBoss(b.boss) && !b.smartDone) {
-      smartSpare(b);
-      return !!b.smartDone; // after the third spare the fight is already over
-    }
     game.hp = 0;
     state = 'gameover';
     AU.setTrack('title');
@@ -1637,11 +1607,8 @@
     const crit = acc > 0.94;
     let dmg;
     if (isSmartBoss(b.boss)) {
-      /* His 9999 HP is a deliberate grind: 1 per normal hit, 2 per perfect. */
+      /* 9999 HP remains. Small hits only — and no reward, no huge damage. */
       dmg = crit ? 2 : 1;
-    } else if (game.godRuns > 0) {
-      /* Reward for beating him — three runs of one-hit-everything. */
-      dmg = crit ? 1000000000000000 : 100000000;
     } else {
       const base = 12 + game.lov * 3 - b.boss.def;
       dmg = Math.max(2, Math.round(base * (0.55 + acc * 0.85)));
@@ -1664,15 +1631,11 @@
     AU.sfx('win');
     AU.setTrack('victory');
     if (isSmartBoss(b.boss)) {
-      /* Beating him still gives you the list — the story never dead-ends.
-         The reward is a temporary "one hit kills everything" mode. */
+      /* No 9999-HP reward and no super damage any more. The list is the only
+         thing he leaves behind; normally he simply kills Галька instead. */
       game.flags.smartLost = true;
-      game.flags.smartMaster = true;
       game.flags.qstart_q1 = true;
       if (b.boss.rematch) game.flags.smartRematchDone = true;
-      if (game.godRuns <= 0) game.godBaseMaxHp = game.maxHp;
-      game.godRuns = 3;
-      game.maxHp = 9999; game.hp = 9999;
       burst(320, 200, '#ffe6a0', 60, 160);
       const lines = type === 'spare'
         ? [
@@ -1682,15 +1645,15 @@
           ]
         : [
             { who: 'boss', text: 'Ты сделала 9999 ударов. Я посчитал.' },
-            { who: 'sys', text: 'Он ушёл, оставив список. И три прохождения — с его силой.' },
-            { who: 'gal', text: 'Три. Потом вернётся обычный счёт.' }
+            { who: 'sys', text: 'Он ушёл, оставив список из пятидесяти дел.' },
+            { who: 'gal', text: 'Без объяснений. Поняла.' }
           ];
       sayBattle(lines, () => {
         saveGame();
         game.battle = null;
         state = 'world';
         enterRoom(game.roomId, { x: game.player.x, y: Math.min(420, game.player.y + 20) }, true);
-        showToast('✦ СИЛА УМНОГО: 9999 HP · УРОН 10^8 / 10^15 · ОСТАЛОСЬ ' + game.godRuns + ' ПРОХОЖДЕНИЯ');
+        showToast('✦ СПИСОК УМНОГО МУЖЧИНЫ ПОЛУЧЕН. 50 ДЕЛ — БЕЗ БОНУСОВ.');
       });
       return;
     }
@@ -1742,16 +1705,6 @@
     game.battle = null;
     AU.setTrack('ending');
     if (G.accounts && G.accounts.recordCompletion) G.accounts.recordCompletion(game);
-    let godMsg = '';
-    if (game.godRuns > 0) {
-      game.godRuns--;
-      if (game.godRuns <= 0) {
-        game.maxHp = game.godBaseMaxHp || 30;
-        game.hp = Math.min(game.hp, game.maxHp);
-        game.godRuns = 0; game.godBaseMaxHp = 0;
-        godMsg = '✦ СИЛА УМНОГО ИСЧЕЗЛА. Счёт снова обычный.';
-      } else godMsg = '✦ СИЛА УМНОГО: осталось ' + game.godRuns + ' прохождения.';
-    }
     const s = game.spares;
     let lines;
     if (s === BOSSES.length) {
@@ -1773,7 +1726,6 @@
         { who: 'sys', text: 'КОНЕЦ: ОБЫЧНЫЙ ПУТЬ. Пощажено ' + s + ' из ' + BOSSES.length + '.' }
       ];
     }
-    if (godMsg) lines.push({ who: 'sys', text: godMsg });
     lines.push({ who: 'sys', text: 'Нажми Z, чтобы вернуться в меню.' });
     try { localStorage.setItem(KEY, JSON.stringify(snapshot())); } catch (e) {}
     say(lines, () => { state = 'title'; titleIndex = 0; AU.setTrack('title'); });
