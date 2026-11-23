@@ -19,6 +19,36 @@
   }
   G.images.heroine = watchImage(new Image(), 'heroine');
   G.images.heroine.src = 'heroine.png';
+
+  /* Two extra looks for Галька. The first attached picture is Маша, the
+     second is Пастух. The default pixel Галька stays available too. */
+  const SKINS = [
+    { name: 'ГАЛЬКА', img: 'heroine.png' },
+    { name: 'МАША', img: 'masha.png' },
+    { name: 'ПАСТУХ', img: 'pastuh.png' }
+  ];
+  const SKIN_KEY = 'galka_skin_v1';
+  let skinIndex = 0;
+  try { skinIndex = Math.max(0, Math.min(SKINS.length - 1, parseInt(localStorage.getItem(SKIN_KEY) || '0', 10) || 0)); } catch (e) {}
+  SKINS.forEach((s, i) => {
+    if (i === 0) return;
+    const im = watchImage(new Image(), 'skin' + i);
+    im.src = s.img;
+    G.images['skin' + i] = im;
+  });
+  function heroImage() { return skinIndex === 0 ? G.images.heroine : G.images['skin' + skinIndex]; }
+  function heroDraw(o) {
+    return Object.assign({
+      width: skinIndex ? 56 : 40, height: skinIndex ? 60 : 52, legH: skinIndex ? 14 : 13
+    }, o || {});
+  }
+  function setSkin(i) {
+    skinIndex = (i + SKINS.length) % SKINS.length;
+    try { localStorage.setItem(SKIN_KEY, String(skinIndex)); } catch (e) {}
+  }
+  G.setHeroSkin = setSkin;
+  G.heroSkin = () => SKINS[skinIndex].name;
+
   BOSSES.forEach(b => {
     const im = watchImage(new Image(), b.id);
     im.src = b.portrait;
@@ -731,7 +761,7 @@
       A.text(ctx, who, x + 21, y + 3, { size: 12, color: '#ffe6a0', shadow: false });
     }
     let img = this.img || null;
-    if (line.who === 'gal') img = G.images.heroine;
+    if (line.who === 'gal') img = heroImage();
     else if (line.who === 'sys') img = null;
     const textX = img ? x + 96 : x + 22;
     const textW = img ? w - 120 : w - 42;
@@ -1133,11 +1163,10 @@
       });
     }
     const p = game.player;
-    A.drawChar(ctx, G.images.heroine, p.x, p.y + 16, p.frame, {
-      width: 40, height: 52, legH: 13,
+    A.drawChar(ctx, heroImage(), p.x, p.y + 16, p.frame, heroDraw({
       legColor: '#304848', bootColor: '#202236',
       outline: netMode ? netSelfColor() : (game.lov > 2 ? 'rgba(255,143,184,.75)' : 'rgba(255,255,255,.45)')
-    });
+    }));
     if (netMode) {
       A.text(ctx, (netPlayers[netSelfIndex] || {}).nick || 'ТЫ', p.x, p.y - 34, {
         size: 9, color: netSelfColor(), align: 'center', shadow: false
@@ -1701,7 +1730,10 @@
     sayBattle(b.boss[type], () => {
       saveGame();
       if (b.boss.final) { showEnding(); return; }
-      const roomMap = { abayunda: 'school', afina: 'school', huyet: 'street', yasr: 'metro', director: 'office' };
+      const roomMap = {
+        abayunda: 'school', afina: 'school', huyet: 'street', yasr: 'metro',
+        loma: 'lomaRoom', byba: 'bybaRoom', petrunya: 'petrunyaRoom', director: 'office'
+      };
       const id = roomMap[b.boss.id];
       game.battle = null;
       state = 'world';
@@ -2239,6 +2271,7 @@
   function titleOptions() {
     const opts = ['НОВАЯ ИГРА'];
     if (hasSave()) opts.push('ПРОДОЛЖИТЬ');
+    opts.push('СКИН: ' + G.heroSkin());
     opts.push('АККАУНТ И ТОПЫ');
     opts.push('СОЗДАТЬ ЛОББИ');
     opts.push('ВОЙТИ ПО КОДУ');
@@ -2259,10 +2292,10 @@
     }
     ctx.globalAlpha = 1;
 
-    // floating heroine (her own picture + little legs)
-    A.drawChar(ctx, G.images.heroine, 320, 258 + Math.sin(T * 1.8) * 4, Math.floor(T * 3) % 3, {
+    // floating heroine (current skin + little legs)
+    A.drawChar(ctx, heroImage(), 320, 238 + Math.sin(T * 1.8) * 4, Math.floor(T * 3) % 3, heroDraw({
       width: 76, height: 88, legH: 16, legColor: '#304848', bootColor: '#202236', outline: '#ff8fb8'
-    });
+    }));
 
     A.text(ctx, 'ГАЛЬКА', 320, 96, { size: 62, color: '#fff', align: 'center', shadowColor: '#ff5d8f', shadowX: 4, shadowY: 5 });
     A.text(ctx, 'ПОДЗЕМНЫЙ РИТМ', 320, 128, { size: 17, color: '#ffb3ce', align: 'center' });
@@ -2270,26 +2303,26 @@
 
     const opts = titleOptions();
     opts.forEach((o, i) => {
-      const y = 292 + i * 28;
+      const y = 274 + i * 24;
       const sel = titleIndex === i;
-      A.text(ctx, (sel ? '▶ ' : '   ') + o, 320, y, { size: 16, color: sel ? '#ffe6a0' : '#aab3dd', align: 'center', shadow: false });
+      A.text(ctx, (sel ? '▶ ' : '   ') + o, 320, y, { size: 15, color: sel ? '#ffe6a0' : '#aab3dd', align: 'center', shadow: false });
     });
     const netOnline = G.net && G.net.status() === 'online';
     A.text(ctx, 'ЛОББИ: ' + (netOnline ? 'СЕРВЕР НА СВЯЗИ · ' + (G.netui ? G.netui.lobbyCount() : 0) + ' АКТИВНЫХ' : 'НЕТ СВЯЗИ — ПРОВЕРЬ ИНТЕРНЕТ'), 320, 222, {
       size: 9, color: netOnline ? '#8affc8' : '#ff9ec0', align: 'center', shadow: false
     });
 
-    // boss thumbnails
+    // boss thumbnails — all eight story bosses, including the three newcomers
     BOSSES.forEach((b, i) => {
-      const x = 34 + i * 118;
+      const x = 37 + i * 72;
       const beaten = game.defeated[b.id];
       ctx.globalAlpha = beaten ? 0.95 : 0.55;
-      A.portrait(ctx, G.images[b.id], x, 386, 62, 62, { bg: b.colors.dark, t: T });
+      A.portrait(ctx, G.images[b.id], x, 408, 54, 54, { bg: b.colors.dark, t: T });
       ctx.globalAlpha = 1;
-      A.text(ctx, b.name.length > 10 ? b.name.slice(0, 9) + '…' : b.name, x + 31, 465, { size: 9, color: beaten ? b.colors.light : '#8790bb', align: 'center' });
-      if (beaten) A.text(ctx, game.spared[b.id] ? '♥' : '×', x + 56, 397, { size: 14, color: game.spared[b.id] ? '#8affc8' : '#ff8fb8', align: 'center' });
+      A.text(ctx, b.name.length > 7 ? b.name.slice(0, 6) + '…' : b.name, x + 27, 476, { size: 8, color: beaten ? b.colors.light : '#8790bb', align: 'center' });
+      if (beaten) A.text(ctx, game.spared[b.id] ? '♥' : '×', x + 48, 418, { size: 12, color: game.spared[b.id] ? '#8affc8' : '#ff8fb8', align: 'center' });
     });
-    A.text(ctx, Object.keys(ROOMS).length + ' МЕСТ · ' + (G.QUESTS || []).length + ' КВЕСТОВ · 5 БОССОВ ПО 3 ФАЗЫ · ГАЛЬКЕ 59', 320, 158, { size: 10, color: '#8e98c6', align: 'center' });
+    A.text(ctx, Object.keys(ROOMS).length + ' МЕСТ · ' + (G.QUESTS || []).length + ' КВЕСТОВ · ' + BOSSES.length + ' БОССОВ ПО 3 ФАЗЫ · ГАЛЬКЕ 59', 320, 158, { size: 10, color: '#8e98c6', align: 'center' });
   }
 
   function drawGameOver() {
@@ -2300,7 +2333,7 @@
   }
 
   function drawEnding() {
-    A.drawBattleBG(ctx, BOSSES[4], T * 0.3);
+    A.drawBattleBG(ctx, BOSSES.find(b => b.final) || BOSSES[BOSSES.length - 1], T * 0.3);
     if (game.dialogue) game.dialogue.draw(40, 300, 560, 152);
   }
 
@@ -2364,6 +2397,12 @@
       if (pressed.z) {
         AU.ensure(); AU.sfx('select');
         const o = opts[titleIndex];
+        if (o.indexOf('СКИН') === 0) {
+          setSkin(skinIndex + 1);
+          AU.sfx('move');
+          clearPressed();
+          return;
+        }
         if (o.indexOf('АККАУНТ') === 0) {
           if (G.accounts && G.accounts.open) G.accounts.open();
           clearPressed();
@@ -2493,6 +2532,8 @@
     attack: () => { if (game.battle) resolveAttack(game.battle); },
     setEnemyHp: v => { if (game.battle) game.battle.enemyHp = v; },
     spare: () => { if (game.battle) victory(game.battle, 'spare'); },
-    enemyAttack: () => { if (game.battle) enemyAttack(); }
+    enemyAttack: () => { if (game.battle) enemyAttack(); },
+    heroSkin: () => G.heroSkin(),
+    setHeroSkin: setSkin
   };
 })(window.GALKA = window.GALKA || {});
