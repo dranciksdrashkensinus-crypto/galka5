@@ -227,26 +227,7 @@ body.touch-mode .touch-help { display: inline; }
   }
 }
 
-/* ---------------- local co-op ---------------- */
 .hidden { display: none !important; }
-body.touch-mode .btn-p2 { display: none; }
-body.touch-mode.coop-mode .btn-p2 {
-  display: block;
-  width: 46px;
-  height: 46px;
-  font-size: 13px;
-  border-color: rgba(199,125,255,.9);
-  background: rgba(66,32,100,.88);
-}
-body.touch-mode .stick2 { display: none; }
-body.touch-mode.coop-mode .stick2 {
-  display: block;
-  top: 70%;
-  border-color: rgba(199,125,255,.7);
-  background: radial-gradient(circle, rgba(160,90,220,.2) 0%, rgba(10,12,24,.5) 70%);
-}
-body.touch-mode.coop-mode .stick2.active { border-color: #c77dff; }
-body.touch-mode.coop-mode .stick2 .stick-knob { background: rgba(199,125,255,.75); }
 
 /* ---------------- network lobby ---------------- */
 .net-hud {

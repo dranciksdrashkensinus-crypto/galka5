@@ -54,9 +54,7 @@
   const keymap = {
     arrowup: 'up', w: 'up', arrowdown: 'down', s: 'down',
     arrowleft: 'left', a: 'left', arrowright: 'right', d: 'right',
-    z: 'z', enter: 'z', ' ': 'z', x: 'x', escape: 'x', m: 'm',
-    // second local player: IJKL move, U dash, O back
-    i: 'up2', k: 'down2', j: 'left2', l: 'right2', u: 'z2', o: 'x2'
+    z: 'z', enter: 'z', ' ': 'z', x: 'x', escape: 'x', m: 'm'
   };
 
   function toggleMute() {
@@ -126,11 +124,7 @@
     btn.addEventListener('pointerleave', release);
   });
 
-  /* Thumb sticks: drag the knob; a small tilt is slow, a full pull is full speed.
-     suffix '' = player 1 (red soul), suffix '2' = player 2 (purple soul). */
-  const stickVec2 = { x: 0, y: 0, active: false };
-  G.stickVec2 = stickVec2;
-
+  /* Thumb stick: drag the knob; a small tilt is slow, a full pull is full speed. */
   function setupStick(stickIdName, knobIdName, suffix, vec) {
     const stick = document.getElementById(stickIdName);
     const knob = document.getElementById(knobIdName);
@@ -201,19 +195,16 @@
     stick.addEventListener('lostpointercapture', endStick);
   }
   setupStick('stick', 'stickKnob', '', stickVec);
-  setupStick('stick2', 'stickKnob2', '2', stickVec2);
 
   /* Keyboard = digital (full speed), stick = analog (speed follows the tilt). */
-  function moveInput(suffix) {
-    suffix = suffix || '';
-    const vec = suffix === '2' ? stickVec2 : stickVec;
+  function moveInput() {
     let vx = 0, vy = 0, mag = 0;
-    if (vec.active) {
-      mag = Math.hypot(vec.x, vec.y);
-      if (mag) { vx = vec.x / mag; vy = vec.y / mag; }
+    if (stickVec.active) {
+      mag = Math.hypot(stickVec.x, stickVec.y);
+      if (mag) { vx = stickVec.x / mag; vy = stickVec.y / mag; }
     } else {
-      if (down['left' + suffix]) vx--; if (down['right' + suffix]) vx++;
-      if (down['up' + suffix]) vy--; if (down['down' + suffix]) vy++;
+      if (down.left) vx--; if (down.right) vx++;
+      if (down.up) vy--; if (down.down) vy++;
       mag = Math.hypot(vx, vy);
       if (mag) { vx /= mag; vy /= mag; mag = 1; }
     }
@@ -223,7 +214,6 @@
   /* One-shot key presses must never survive a frame, even on an early return. */
   function clearPressed() {
     pressed.up = pressed.down = pressed.left = pressed.right = pressed.z = pressed.x = pressed.m = false;
-    pressed.up2 = pressed.down2 = pressed.left2 = pressed.right2 = pressed.z2 = pressed.x2 = false;
   }
 
   function fit() {
@@ -286,8 +276,7 @@
     player: { x: 320, y: 410, dir: 'down', frame: 0, walkT: 0 },
     dialogue: null, battle: null, particles: [], fade: null,
     messageTime: 0, message: '',
-    coop: false, questsDone: 0, startedAt: 0,
-    p2: { x: 356, y: 410 }
+    questsDone: 0, startedAt: 0
   };
 
   function newGame() {
@@ -298,7 +287,6 @@
     game.flags = {}; game.defeated = {}; game.spared = {};
     game.questsDone = 0; game.startedAt = Date.now();
     game.player = { x: 320, y: 410, dir: 'down', frame: 0, walkT: 0 };
-    game.p2 = { x: 356, y: 410 };
     game.dialogue = null; game.battle = null; game.particles = []; game.fade = null;
     AU.setTrack('home');
     enterRoom('home', ROOMS.home.spawn, true);
@@ -315,8 +303,6 @@
     }));
     if (!netPlayers.length) netPlayers = [{ id: G.net.selfId, nick: G.net.nick() || 'ГАЛЬКА', color: NET_COLORS[0], x: 320, y: 410 }];
     netSelfIndex = Math.max(0, netPlayers.findIndex(p => p.id === G.net.selfId));
-    game.coop = netPlayers.length > 1;
-    document.body.classList.toggle('coop-mode', game.coop);
     newGame();
     state = 'world';
     say([
@@ -343,7 +329,7 @@
         npcName: game.dialogue.npcName || '', imgKey: netImageKey(game.dialogue.img)
       } : null,
       battle: b ? {
-        bossId: b.boss.id, phase: b.phase, timer: b.timer, duration: b.duration,
+        bossId: b.boss.id, questId: b.boss.questId || null, phase: b.phase, timer: b.timer, duration: b.duration,
         enemyHp: b.enemyHp, enemyMax: b.enemyMax, phaseIdx: b.phaseIdx,
         attackName: b.attackName, spareReady: b.spareReady, winType: b.winType,
         menuIndex: b.menuIndex, sub: b.sub, subIndex: b.subIndex,
@@ -396,7 +382,7 @@
     } else game.dialogue = null;
 
     if (s.battle) {
-      const boss = bossById(s.battle.bossId) || BOSSES[0];
+      const boss = bossById(s.battle.bossId) || questBossById(s.battle.bossId, s.battle.questId) || BOSSES[0];
       if (!game.battle || game.battle.boss.id !== boss.id) game.battle = makeBattle(boss);
       const b = game.battle;
       Object.assign(b, {
@@ -424,9 +410,8 @@
       kills: game.kills, spares: game.spares, inv: Object.assign({}, game.inv),
       flags: Object.assign({}, game.flags), defeated: Object.assign({}, game.defeated),
       spared: Object.assign({}, game.spared),
-      questsDone: game.questsDone, startedAt: game.startedAt, coop: game.coop,
-      player: { x: game.player.x, y: game.player.y },
-      p2: { x: game.p2.x, y: game.p2.y }
+      questsDone: game.questsDone, startedAt: game.startedAt,
+      player: { x: game.player.x, y: game.player.y }
     };
   }
 
@@ -449,9 +434,8 @@
         kills: d.kills || 0, spares: d.spares || 0,
         inv: Object.assign({ pie: 0, tea: 0, candy: 0 }, d.inv),
         flags: d.flags || {}, defeated: d.defeated || {}, spared: d.spared || {},
-        questsDone: d.questsDone || 0, startedAt: d.startedAt || Date.now(), coop: !!d.coop
+        questsDone: d.questsDone || 0, startedAt: d.startedAt || Date.now()
       });
-      game.p2 = { x: (d.p2 && d.p2.x) || 356, y: (d.p2 && d.p2.y) || 410 };
       game.hp = Math.max(1, Math.min(game.hp, game.maxHp));
       AU.setTrack(ROOMS[game.roomId].track);
       const savedPlayer = d.player || {};
@@ -463,18 +447,43 @@
   function bossById(id) { return BOSSES.find(b => b.id === id); }
   function defeatedCount() { return BOSSES.filter(b => game.defeated[b.id]).length; }
 
+  function questFoeFor(key, questId) {
+    const src = (G.QUEST_FOES || {})[key];
+    if (!src) return BOSSES[0];
+    return Object.assign({}, src, { questId: questId || null });
+  }
+  function questBossById(id, questId) {
+    const src = Object.keys(G.QUEST_FOES || {}).map(k => G.QUEST_FOES[k]).find(b => b.id === id);
+    return src ? Object.assign({}, src, { questId: questId || null }) : null;
+  }
+
   function enterRoom(id, spawn, instant) {
     const doIt = () => {
       game.roomId = id;
       const r = ROOMS[id];
       game.player.x = spawn.x; game.player.y = spawn.y;
       game.player.frame = 0; game.player.walkT = 0;
-      game.p2.x = spawn.x + 36; game.p2.y = spawn.y;
       game.dialogue = null;
       AU.setTrack(r.track);
+      maybeSmartEncounter(id);
     };
     if (instant) doIt();
     else game.fade = { a: 0, phase: 'in', cb: doIt };
+  }
+
+  /* After Галька disobeys, the smart man stops waiting in quests and
+     meets her on the road. One rematch, then the orders are over. */
+  function maybeSmartEncounter(id) {
+    if (netMode || state === 'battle' || game.dialogue) return;
+    if (id !== 'hub') return;
+    if (!game.flags.smartDisobeyed || game.flags.smartRematchDone || game.flags.smartEncounterSeen) return;
+    game.flags.smartEncounterSeen = true;
+    say([
+      { who: 'sys', text: 'Умный мужчина вышел на перекрёсток сам. Без задания.' },
+      { who: 'boss', text: 'Ты ослушалась. Я это посчитал.' },
+      { who: 'gal', text: 'Считай дальше. Только сначала помечай.' }
+    ], () => startBattle(questFoeFor('smartRematch')), 'УМНЫЙ МУЖЧИНА');
+    game.dialogue.img = G.images['smart-man'];
   }
 
   function say(lines, cb, speaker) {
@@ -487,6 +496,7 @@
     this.speaker = speaker;
     this.lines = (lines || []).filter(Boolean);
     this.i = 0; this.chars = 0; this.cb = cb || null;
+    this.onCancel = null;
     this.wrapped = null; this.cacheKey = '';
   }
 
@@ -495,6 +505,14 @@
   Dialog.prototype.update = function (dt) {
     const line = this.cur();
     this.chars += dt * 62;
+    if (pressed.x && this.onCancel) {
+      const cb = this.onCancel;
+      this.onCancel = null;
+      game.dialogue = null;
+      AU.sfx('back');
+      cb();
+      return true;
+    }
     if (pressed.z) {
       if (this.chars < line.text.length) {
         this.chars = line.text.length;
@@ -628,11 +646,14 @@
   function npcTalk(n) {
     if (n.id === 'questLog') {
       const done = game.questsDone || 0, total = (G.QUESTS || []).length;
-      say([
-        { who: 'sys', text: 'ВЫПОЛНЕНО КВЕСТОВ: ' + done + ' / ' + total },
-        { who: 'govnoed', text: done < total ? 'Ещё ' + (total - done) + ' заданий. Я помажусь, пока жду.' : 'Все выполнены. Можно мазаться.' },
-        { who: 'gal', text: 'Без объяснений. Иду дальше.' }
-      ]);
+      const lines = [
+        { who: 'sys', text: 'ВЫПОЛНЕНО ДЕЛ: ' + done + ' / ' + total },
+        { who: 'sys', text: game.flags.smartLost ? 'УМНЫЙ МУЖЧИНА: ты проиграла проверку. Он тебя пощадил и оставил список.' : 'УМНЫЙ МУЖЧИНА: ещё не проверял тебя. Он стоит на перекрёстке.' },
+        { who: 'sys', text: game.flags.smartDisobeyed ? 'ОСЛУШАНИЕ: есть. Он придёт сам, вне заданий.' : 'ОСЛУШАНИЕ: пока нет.' },
+        { who: 'sys', text: game.flags.smartRematchDone ? 'ВСТРЕЧА ВНЕ КВЕСТОВ: состоялась.' : 'ВСТРЕЧА ВНЕ КВЕСТОВ: ещё впереди, если ослушаешься.' },
+        { who: 'gal', text: 'Пятьдесят дел. Без объяснений.' }
+      ];
+      say(lines);
       return;
     }
     if (n.warp) {
@@ -641,6 +662,27 @@
         AU.sfx('door');
         enterRoom(w.room, { x: w.x, y: w.y });
       });
+      return;
+    }
+    if (n.questDuel === 'smartFirst') {
+      if (!game.flags.smartLost) { startBattle(questFoeFor('smartFirst')); return; }
+      say([
+        { who: 'boss', text: 'Ты уже проиграла. Теперь делай список.' },
+        { who: 'gal', text: 'Список у меня. Без объяснений.' }
+      ]);
+      game.dialogue.img = G.images['smart-man'];
+      game.dialogue.npcName = 'УМНЫЙ МУЖЧИНА';
+      return;
+    }
+    if (n.questFoe) {
+      const q = (G.QUESTS || []).find(x => x.id === n.questFoe);
+      if (!q) return;
+      if (game.flags['qdone_' + q.id]) {
+        say([{ who: 'sys', text: 'Здесь уже разобрались. Иди к тому, кто просил.' }]);
+        return;
+      }
+      game.flags['qstart_' + q.id] = true;
+      startBattle(questFoeFor(q.foe, q.id));
       return;
     }
     if (n.questItem) {
@@ -661,19 +703,38 @@
       if (!q) return;
       game.dialogue = null;
       if (game.flags['qdone_' + q.id]) {
-        say([{ who: 'sys', text: 'Квест уже выполнен. ' + q.title }]);
+        say([{ who: 'sys', text: 'Дело уже закрыто. ' + q.title }]);
       } else if (game.flags['qitem_' + q.id]) {
         game.flags['qdone_' + q.id] = true;
         game.questsDone++;
         game.maxHp += 2;
         game.hp = Math.min(game.maxHp, game.hp + 2);
         game.inv.candy = (game.inv.candy || 0) + 1;
+        if (q.rival) {
+          game.flags.smartDisobeyed = true;
+          game.flags['ally_' + q.char] = (game.flags['ally_' + q.char] || 0) + 1;
+        }
         say(q.doneLines);
-        showToast('✦ КВЕСТ: ' + q.title + '  (' + game.questsDone + '/' + G.QUESTS.length + ')');
+        showToast('✦ ДЕЛО: ' + q.title + '  (' + game.questsDone + '/' + G.QUESTS.length + ')');
         AU.sfx('save');
       } else {
         game.flags['qstart_' + q.id] = true;
         say(q.lines);
+        game.dialogue.onCancel = () => {
+          game.flags['qdisobey_' + q.id] = true;
+          if (!q.rival) {
+            game.flags.smartDisobeyed = true;
+            say([
+              { who: 'gal', text: 'Не буду. И объяснять не буду.' },
+              { who: 'sys', text: 'Умный мужчина услышал отказ. Он придёт сам.' }
+            ]);
+          } else {
+            say([
+              { who: 'gal', text: 'Не буду. У меня и так дел хватает.' },
+              { who: 'sys', text: 'Ты отказала. Это не ослушание умного — просто отказ.' }
+            ]);
+          }
+        };
       }
       game.dialogue.img = G.images[q.char];
       game.dialogue.npcName = G.NEWCHARS[q.char].name;
@@ -744,15 +805,6 @@
             const n = nearestNpc(q.x, q.y);
             if (n) { AU.sfx('select'); npcTalk(n); }
           }
-        }
-        if (netPlayers[1]) { game.p2.x = netPlayers[1].x; game.p2.y = netPlayers[1].y; }
-      } else if (game.coop) {
-        const m2 = moveInput('2'), q = game.p2;
-        if (m2.mag > 0) {
-          let nx = Math.max(14, Math.min(W - 14, q.x + m2.vx * 132 * dt * m2.mag));
-          if (!solidAt(nx - 10, q.y - 6, 20, 12)) q.x = nx;
-          let ny = Math.max(30, Math.min(H - 16, q.y + m2.vy * 132 * dt * m2.mag));
-          if (!solidAt(q.x - 10, ny - 6, 20, 12)) q.y = ny;
         }
       }
 
@@ -891,12 +943,6 @@
           size: 9, color: q.color, align: 'center', shadow: false
         });
       });
-    } else if (game.coop) {
-      A.drawChar(ctx, G.images.heroine, game.p2.x, game.p2.y + 16, 0, {
-        width: 40, height: 52, legH: 13,
-        legColor: '#3a2a58', bootColor: '#1b1630', outline: 'rgba(199,125,255,.9)'
-      });
-      A.text(ctx, 'P2', game.p2.x, game.p2.y - 34, { size: 9, color: '#d9b3ff', align: 'center', shadow: false });
     }
 
     drawParticles();
@@ -978,13 +1024,13 @@
     resetNetSouls(game.battle);
     game.dialogue = null;
     state = 'battle';
-    AU.setTrack(boss.id === 'huyet' ? 'huyet' : boss.id);
+    AU.setTrack(boss.quest ? 'path' : (boss.id === 'huyet' ? 'huyet' : boss.id));
     AU.sfx('select');
   }
 
   function sayBattle(lines, next) {
     game.dialogue = new Dialog(game.battle.boss.name, lines, () => { next(); });
-    if (game.battle) game.dialogue.img = G.images[game.battle.boss.id];
+    if (game.battle) game.dialogue.img = G.images[game.battle.boss.portrait] || G.images[game.battle.boss.id];
   }
 
   function buildSchedule(b) {
@@ -1294,8 +1340,27 @@
   function afterAttack() {
     const b = game.battle;
     b.bullets = [];
+    if (b.boss.scriptedLose && b.turn >= 1) { questDefeat(b); return; }
     const taunt = b.boss.taunts[(b.turn - 1) % b.boss.taunts.length];
     sayBattle(taunt, () => { b.phase = 'menu'; b.sub = null; b.menuIndex = 0; });
+  }
+
+  /* The first duel with the smart man is meant to be lost. He stops the
+     fight himself, spares Галька and leaves her the list of fifty orders. */
+  function questDefeat(b) {
+    b.phase = 'victory';
+    b.winType = 'lost';
+    AU.sfx('hurt');
+    sayBattle(b.boss.lose || [{ who: 'sys', text: 'Ты проиграла.' }], () => {
+      game.flags.smartLost = true;
+      game.flags.smartMaster = true;
+      game.flags.qstart_q1 = true;
+      saveGame();
+      game.battle = null;
+      state = 'world';
+      enterRoom(game.roomId, { x: 320, y: 340 }, true);
+      showToast('✦ УМНЫЙ МУЖЧИНА ПОЩАДИЛ ТЕБЯ. Начни со списка.');
+    });
   }
 
   function activeActs(b) {
@@ -1346,6 +1411,21 @@
     b.phase = 'victory';
     AU.sfx('win');
     AU.setTrack('victory');
+    if (b.boss.quest) {
+      if (type === 'spare') game.flags['qspare_' + b.boss.id] = true;
+      else game.exp += b.boss.exp || 0;
+      if (b.boss.questId) game.flags['qitem_' + b.boss.questId] = true;
+      if (b.boss.rematch) game.flags.smartRematchDone = true;
+      burst(320, 200, type === 'spare' ? '#8affc8' : b.boss.colors.main, 60, 160);
+      sayBattle(b.boss[type], () => {
+        saveGame();
+        game.battle = null;
+        state = 'world';
+        enterRoom(game.roomId, { x: game.player.x, y: Math.min(420, game.player.y + 20) }, true);
+        showToast(type === 'spare' ? '✦ РАЗОБРАЛАСЬ БЕЗ УБИЙСТВА. Вернись к тому, кто просил.' : '✦ РАЗОБРАЛАСЬ. Вернись к тому, кто просил.');
+      });
+      return;
+    }
     if (type === 'spare') {
       game.spares++;
       game.spared[b.boss.id] = true;
@@ -1438,21 +1518,17 @@
         AU.sfx('bullet');
       }
 
-      // Player 2 (purple soul). Local IJKL/stick, or a network guest; shared HP pool.
-      if (game.coop) {
-        let m2 = moveInput('2');
-        let dash2 = pressed.z2;
-        if (netMode === 'host' && netPlayers[1]) {
-          const inp = netInputFor(1);
-          m2 = inp && inp.v ? { vx: inp.v.x, vy: inp.v.y, mag: inp.v.mag } : { vx: 0, vy: 0, mag: 0 };
-          dash2 = takeNetZ(1);
-        }
+      // Network player 2 (purple soul). Shared HP pool.
+      if (netMode === 'host' && netPlayers.length > 1 && netPlayers[1]) {
+        const inp = netInputFor(1);
+        const m2 = inp && inp.v ? { vx: inp.v.x, vy: inp.v.y, mag: inp.v.mag } : { vx: 0, vy: 0, mag: 0 };
+        const dash2 = takeNetZ(1);
         const s2 = (b.h2Dash > 0 ? 430 : 168) * dt * m2.mag;
         b.h2x = Math.max(A0.x + 12, Math.min(A0.x + A0.w - 12, b.h2x + m2.vx * s2));
         b.h2y = Math.max(A0.y + 12, Math.min(A0.y + A0.h - 12, b.h2y + m2.vy * s2));
         if (dash2 && b.dashUnlocked && b.h2DashCd <= 0) {
           b.h2Dash = 0.2; b.h2DashCd = 1.5; b.h2Invuln = Math.max(b.h2Invuln, 0.25);
-          burst(b.h2x, b.h2y, netMode ? netPlayers[1].color : '#c77dff', 10, 60);
+          burst(b.h2x, b.h2y, netPlayers[1].color, 10, 60);
           AU.sfx('bullet');
         }
       }
@@ -1570,7 +1646,7 @@
             AU.setTrack('title');
             return;
           }
-        } else if (game.coop && b.h2Invuln <= 0 && Math.hypot(p.x - b.h2x, p.y - b.h2y) < p.r + 7) {
+        } else if (netMode === 'host' && netPlayers.length > 1 && b.h2Invuln <= 0 && Math.hypot(p.x - b.h2x, p.y - b.h2y) < p.r + 7) {
           const dmg2 = Math.max(1, Math.round(b.boss.atk * (game.spared[b.boss.id] ? 0.5 : 0.85)));
           game.hp -= dmg2;
           b.h2Invuln = 1.0;
@@ -1679,7 +1755,7 @@
     const tiny = b.boss.id === 'director' ? 0.72 : 1;
     ctx.save();
     ctx.translate(320, 196); ctx.scale(pulse * tiny, pulse * tiny); ctx.translate(-320, -196);
-    A.drawChar(ctx, G.images[b.boss.id], 320, 288, Math.floor(T * 3) % 3, {
+    A.drawChar(ctx, G.images[b.boss.portrait] || G.images[b.boss.id], 320, 288, Math.floor(T * 3) % 3, {
       width: 112, height: 132, legH: 20,
       legColor: b.boss.colors.dark, bootColor: '#111322',
       tint: b.slash > 0 ? '#ffffff' : null, tintAlpha: 0.55,
@@ -1737,10 +1813,10 @@
     A.text(ctx, 'HP ' + game.hp + '/' + game.maxHp, 508, 57, { size: 12, color: '#ff9fb0' });
     A.px(ctx, 480, 66, 128, 4, '#22243c');
     A.px(ctx, 480, 66, 128 * Math.max(0, game.hp / game.maxHp), 4, '#ff5d7d');
-    if (game.coop) {
+    if (netMode && netPlayers.length > 1) {
       A.panel(ctx, 470, 78, 150, 24, { fill: 'rgba(8,10,22,.85)', border: '#9b7ad8' });
       A.heart(ctx, 488, 91, 10, '#c77dff', T * 5);
-      A.text(ctx, 'P2', 502, 88, { size: 10, color: '#fff' });
+      A.text(ctx, 'ИГРОК 2', 502, 88, { size: 10, color: '#fff' });
       A.text(ctx, 'ОБЩЕЕ HP ' + game.hp, 502, 98, { size: 9, color: '#d9b3ff', shadow: false });
     }
 
@@ -1810,8 +1886,8 @@
         A.heart(ctx, b.hx, b.hy + 12, 14, '#8ff5ff', 0);
         ctx.globalAlpha = 1;
       }
-      if (game.coop) {
-        const c2 = netMode ? (netPlayers[1] || {}).color || NET_COLORS[1] : '#c77dff';
+      if (netMode && netPlayers.length > 1) {
+        const c2 = (netPlayers[1] || {}).color || NET_COLORS[1];
         if (b.h2Invuln <= 0 || Math.floor(T * 16) % 2 === 0) {
           A.heart(ctx, b.h2x, b.h2y, 17, c2, T * 6 + 1.3);
         }
@@ -2047,7 +2123,6 @@
         }
         if (o === 'ПРОДОЛЖИТЬ') { if (!loadGame()) newGame(); }
         else newGame();
-        document.body.classList.toggle('coop-mode', game.coop);
         state = 'world';
         if (!game.dialogue) {
           say([{ who: 'sys', text: 'Галька проснулась. Восьмой год в школе. Шестой — с классом 6 «И». Сегодня опять кричать.' },
@@ -2136,12 +2211,11 @@
   G.net.on('state', s => { netSnap = s; });
   G.net.on('left', () => {
     netMode = ''; netPlayers = []; netInputs = {}; netSnap = null;
-    game.coop = false;
-    document.body.classList.remove('coop-mode');
   });
 
   G.debug = {
-    game, startBattle, bossById, getState: () => state, say, makeBattle, buildSchedule,
+    game, startBattle, bossById, questFoeFor, questBossById, npcTalk, enterRoom, getState: () => state, say, makeBattle, buildSchedule,
+    netSnap: () => netSnap,
     netInfo: () => ({
       mode: netMode, selfIndex: netSelfIndex,
       players: netPlayers.map(p => ({ id: p.id, nick: p.nick, x: Math.round(p.x), y: Math.round(p.y), color: p.color })),
