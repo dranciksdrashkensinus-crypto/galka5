@@ -573,5 +573,143 @@
     }
   };
 
-  G.HELP = 'Движение — WASD/стрелки. Z — говорить и выбирать. X — назад.';
+  /* ---------------- four new characters ---------------- */
+  G.NEWCHARS = {
+    govnoed: {
+      name: 'ГОВНОЕД', img: 'govnoed.png', color: '#a4814f', dark: '#3d2f1d',
+      lines: [
+        L('govnoed', 'Галька, не смотри так. Я просто кушаю. И мажусь. Это моя еда и мой крем.'),
+        L('gal', 'Восьмой год в школе, а ты всё ещё в этом.'),
+        L('govnoed', 'Зато я не орю.')
+      ]
+    },
+    globus: {
+      name: 'ЛЫСЫЙ ГЛОБУС', img: 'globus.png', color: '#6fa8dc', dark: '#16354f',
+      lines: [
+        L('globus', 'Алло? Алло? Галька, слышишь? Я по патифону. Всегда по патифону.'),
+        L('gal', 'У тебя же нет волос. И связи.'),
+        L('globus', 'Зато есть базар. Сто первый уровень.')
+      ]
+    },
+    shesterka: {
+      name: '6-ЕРКА', img: 'shesterka.png', color: '#ff9ec0', dark: '#4a1f38',
+      lines: [
+        L('shesterka', 'Я поздоровалась с учителем. Очень вежливо. Ноги сами потянулись.'),
+        L('gal', 'Опять лизала?'),
+        L('shesterka', 'Это был комплимент. У меня так принято.')
+      ]
+    },
+    smart: {
+      name: 'УМНЫЙ МУЖЧИНА', img: 'smart-man.png', color: '#9ad9a6', dark: '#183a2a',
+      lines: [
+        L('smart', 'Галька, если идти shortest путём, ты опоздаешь. Если идти твоим — тоже.'),
+        L('gal', 'Ты умный. И что?'),
+        L('smart', 'Я просто очень умный. Без объяснений.')
+      ]
+    }
+  };
+
+  /* ---------------- 50 quests about the four newcomers ---------------- */
+  G.QUESTS = [];
+  const QASK = [
+    ['Принеси мне свежий кусочек. Не спрашивай откуда.', 'Говноед ждёт. Кусочек где-то рядом.'],
+    ['Нужно три патифона, чтобы поговорить с глушителем.', 'Лысый глобус просит патифон. Он где-то тут.'],
+    ['Принеси учительскую подошву. Для вежливости.', '6-ерка ищет подошву. Для комплимента.'],
+    ['Найди мне умную мысль. Она не здесь, но рядом.', 'Умный мужчина потерял мысль. Очень умную.']
+  ];
+  const QCHARS = ['govnoed', 'globus', 'shesterka', 'smart'];
+  const QITEMS = ['КУСОЧЕК', 'ПАТИФОН', 'ПОДОШВА', 'МЫСЛЬ', 'ОБЕРТКА', 'ЗАПИСКА', 'СТАКАН', 'КНОПКА'];
+  for (let i = 0; i < 50; i++) {
+    const c = QCHARS[i % 4];
+    const pair = QASK[i % 4];
+    const item = QITEMS[Math.floor(i / 4) % QITEMS.length];
+    const ch = G.NEWCHARS[c];
+    G.QUESTS.push({
+      id: 'q' + (i + 1), char: c, item,
+      title: ch.name + ': ' + item,
+      lines: [L('sys', 'ЗАДАНИЕ «' + item + '»'), L(c, pair[0]), L('gal', 'Ладно. Без объяснений.')],
+      doneLines: [L(c, c === 'govnoed' ? 'Вот. Теперь можно мазаться.' : c === 'globus' ? 'Алло? Принято. Ты молодец.' : c === 'shesterka' ? 'Очень вежливо. Спасибо.' : 'Логично. Ты справилась.'), L('sys', '✦ КВЕСТ ВЫПОЛНЕН: ' + item + '  (+2 макс. HP)')],
+      hint: pair[1]
+    });
+  }
+
+  /* ---------------- hub + 87 new locations = 101 total ---------------- */
+  G.rooms.corridor.exits.push(exit(270, 450, 110, 30, 'hub', 320, 70, '↓ НОВЫЕ МЕСТА'));
+
+  G.rooms.hub = {
+    name: 'ПЕРЕКРЁСТОК · 100 МЕСТ', track: 'home', spawn: { x: 320, y: 420 },
+    exits: [
+      exit(0, 180, 34, 170, 'dvor0', 590, 390, '← ДВОРЫ'),
+      exit(610, 180, 34, 170, 'podezd0', 90, 390, '→ ПОДЪЕЗДЫ'),
+      exit(270, 26, 110, 44, 'cherdak0', 320, 420, '↑ ЧЕРДАКИ'),
+      exit(270, 450, 110, 30, 'corridor', 320, 70, '↓ ШКОЛА')
+    ],
+    solids: [[120, 250, 100, 24], [420, 250, 100, 24]],
+    npcs: [
+      { id: 'warpPodval', x: 160, y: 350, w: 40, h: 70, name: 'УКАЗАТЕЛЬ · ПОДВАЛЫ', warp: { room: 'podval0', x: 90, y: 390 }, lines: [L('sys', 'Стрелка вниз. Пахнет сыростью.')] },
+      { id: 'warpSport', x: 480, y: 350, w: 40, h: 70, name: 'УКАЗАТЕЛЬ · СПОРТЗАЛЫ', warp: { room: 'sport0', x: 90, y: 390 }, lines: [L('sys', 'Стрелка направо. Пахнет потом.')] },
+      { id: 'warpLabor', x: 320, y: 250, w: 40, h: 70, name: 'УКАЗАТЕЛЬ · МАСТЕРСКИЕ', warp: { room: 'labor0', x: 90, y: 390 }, lines: [L('sys', 'Стрелка вверх. Пахнет клеем.')] },
+      { id: 'questLog', x: 320, y: 170, w: 40, h: 60, name: 'ЖУРНАЛ КВЕСТОВ', lines: [
+        L('sys', 'В журнале 50 заданий от четырёх новых типов.')
+      ] },
+      { id: 'saveHub', x: 560, y: 300, w: 36, h: 46, name: 'ТОЧКА СОХРАНЕНИЯ', save: true }
+    ]
+  };
+
+  const districts = [
+    { key: 'dvor', name: 'ДВОРЫ', n: 15, words: ['СКАМЕЙКА', 'ЗАБОР', 'КУСТ', 'ПОДЪЕЗД', 'ЛУЖА'] },
+    { key: 'podezd', name: 'ПОДЪЕЗДЫ', n: 15, words: ['ЛИФТ', 'ЛЕСТНИЦА', 'ПОЧТА', 'ПОРОГ', 'ЩИТОК'] },
+    { key: 'cherdak', name: 'ЧЕРДАКИ', n: 15, words: ['БАЛКА', 'КОРОБКА', 'ПЫЛЬ', 'ОКНО', 'ВЕРЁВКА'] },
+    { key: 'podval', name: 'ПОДВАЛЫ', n: 14, words: ['ТРУБА', 'КОТЁЛ', 'СУНДУК', 'ЛУКОВИЦА', 'СЧЁТЧИК'] },
+    { key: 'sport', name: 'СПОРТЗАЛЫ', n: 14, words: ['МЯЧ', 'КОВЁР', 'ШВЕДСКАЯ', 'ТУМБА', 'СВИСТОК'] },
+    { key: 'labor', name: 'МАСТЕРСКИЕ', n: 14, words: ['СТОЛ', 'КЛЕЙ', 'ТИСКИ', 'ЛИНЕЙКА', 'ФАРТУК'] }
+  ];
+
+  let questCursor = 0;
+  districts.forEach((d, di) => {
+    for (let i = 0; i < d.n; i++) {
+      const id = d.key + i;
+      const prev = i > 0 ? d.key + (i - 1) : (di < 3 ? 'hub' : d.key + (i - 1));
+      const next = i < d.n - 1 ? d.key + (i + 1) : (di < 3 ? districts[di + 3].key + '0' : 'hub');
+      const exits = [];
+      if (i > 0) exits.push(exit(0, 180, 34, 170, prev, 590, 390, '← НАЗАД'));
+      else exits.push(exit(0, 180, 34, 170, di < 3 ? 'hub' : districts[di - 3].key + '0', 590, 390, '← К ПЕРЕКРЁСТКУ'));
+      exits.push(exit(610, 180, 34, 170, next, 90, 390, i < d.n - 1 ? '→ ДАЛЬШЕ' : '→ ПЕРЕКРЁСТОК'));
+      if (i >= 4) exits.push(exit(270, 26, 110, 44, d.key + (i - 4), 320, 420, '↑ ВЫШЕ'));
+      if (i + 4 < d.n) exits.push(exit(270, 450, 110, 30, d.key + (i + 4), 320, 70, '↓ НИЖЕ'));
+
+      const npcs = [];
+      if (i === 0 && di >= 3) npcs.push({
+        id: 'back' + d.key, x: 320, y: 250, w: 40, h: 70, name: 'УКАЗАТЕЛЬ', warp: { room: 'hub', x: 320, y: 420 },
+        lines: [L('sys', 'Назад к перекрёстку.')]
+      });
+      if (i > 0 && i % 5 === 0) npcs.push({
+        id: 'sign' + id, x: 320, y: 250, w: 40, h: 70, name: 'УКАЗАТЕЛЬ', warp: { room: d.key + '0', x: 90, y: 390 },
+        lines: [L('sys', 'Указатель к началу участка.')]
+      });
+      if (i % 10 === 9) npcs.push({ id: 'save' + id, x: 555, y: 300, w: 36, h: 46, name: 'ТОЧКА СОХРАНЕНИЯ', save: true });
+
+      if (questCursor < G.QUESTS.length) {
+        const q = G.QUESTS[questCursor++];
+        const c = G.NEWCHARS[q.char];
+        npcs.push({ id: 'giver' + q.id, x: 170, y: 360, w: 52, h: 76, name: c.name, char: q.char, quest: q.id, lines: q.lines });
+        npcs.push({ id: 'item' + q.id, x: 470, y: 360, w: 40, h: 50, name: q.item, questItem: q.id, lines: [L('sys', 'Лежит ' + q.item + '.')] });
+      } else {
+        const ck = QCHARS[(di + i) % 4];
+        const c = G.NEWCHARS[ck];
+        npcs.push({ id: 'extra' + id, x: 170, y: 360, w: 52, h: 76, name: c.name, char: ck, lines: c.lines });
+        npcs.push({ id: 'extra2' + id, x: 470, y: 350, w: 40, h: 54, name: 'НАХОДКА', lines: [L('sys', 'Ничего особенного. Но Галька подобрала.')] });
+      }
+
+      G.rooms[id] = {
+        name: d.name + ' · ' + d.words[i % d.words.length] + ' ' + (i + 1),
+        track: 'path', spawn: { x: 90, y: 390 },
+        exits,
+        solids: [[110, 300, 100, 24], [430, 300, 100, 24], [250, 160, 140, 18]],
+        npcs
+      };
+    }
+  });
+
+  G.HELP = 'Движение — WASD/стрелки. Z — говорить и выбирать. X — назад. IJKL — второй игрок.';
 })(window.GALKA = window.GALKA || {});

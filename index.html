@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>ГАЛЬКА: Подземный Ритм</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=20261123">
 </head>
 <body>
   <div class="shell">
@@ -21,12 +21,62 @@
         <div class="touch-left">
           <button data-key="x" class="btn-back" aria-label="Назад">↩</button>
           <button data-key="z" class="btn-act" aria-label="Действие">ОК</button>
+          <button data-key="z2" class="btn-p2" aria-label="Рывок второго игрока">P2</button>
         </div>
         <div id="stick" class="stick" aria-label="Джойстик управления">
           <div id="stickKnob" class="stick-knob"></div>
         </div>
+        <div id="stick2" class="stick stick2" aria-label="Джойстик второго игрока">
+          <div id="stickKnob2" class="stick-knob"></div>
+        </div>
+      </div>
+      <div id="netHud" class="net-hud hidden">
+        <div class="net-code">КОД <b id="netCode">---</b></div>
+        <div id="netRoster" class="net-roster"></div>
       </div>
     </div>
+
+    <div id="accountOverlay" class="account-overlay hidden"></div>
+    <div id="lobbyOverlay" class="account-overlay hidden">
+      <div class="account-card lobby-card">
+        <button class="acc-close" type="button" data-lobby-action="close">×</button>
+        <h2>СЕТЕВАЯ ИГРА</h2>
+        <div id="lobbyStatus" class="acc-msg">Подключаюсь к серверу лобби…</div>
+        <div class="acc-tabs">
+          <button type="button" data-ltab="create" class="active">СОЗДАТЬ ЛОББИ</button>
+          <button type="button" data-ltab="join">ВОЙТИ ПО КОДУ</button>
+          <button type="button" data-ltab="list">АКТИВНЫЕ ЛОББИ</button>
+        </div>
+        <div data-lpanel="create">
+          <label>Сколько игроков будет с тобой (от 1 до 5)
+            <input id="lobbyNeed" type="number" min="1" max="5" value="1">
+          </label>
+          <label>Ник (если нет аккаунта)
+            <input id="lobbyNick" maxlength="16" placeholder="ГАЛЬКА">
+          </label>
+          <div class="acc-buttons"><button type="button" class="primary" data-lobby-action="create">СОЗДАТЬ ЛОББИ</button></div>
+        </div>
+        <div data-lpanel="join" class="hidden">
+          <label>Код из 3 букв
+            <input id="lobbyCode" maxlength="3" placeholder="ABC" autocomplete="off">
+          </label>
+          <label>Ник (если нет аккаунта)
+            <input id="lobbyNick2" maxlength="16" placeholder="ГАЛЬКА">
+          </label>
+          <div class="acc-buttons"><button type="button" class="primary" data-lobby-action="join">ВОЙТИ В ЛОББИ</button></div>
+        </div>
+        <div data-lpanel="list" class="hidden">
+          <div id="lobbyList" class="acc-list"></div>
+        </div>
+        <div id="lobbyRoom" class="hidden">
+          <div class="lobby-big-code">КОД ЛОББИ: <b id="lobbyMyCode">---</b></div>
+          <div id="lobbyRoster" class="acc-list"></div>
+          <p class="acc-note">Скажи код друзьям. Когда все войдут, игра начнётся сама. Управляют душами все игроки; меню босса ведёт создатель лобби.</p>
+          <div class="acc-buttons"><button type="button" data-lobby-action="leave">ВЫЙТИ ИЗ ЛОББИ</button></div>
+        </div>
+      </div>
+    </div>
+    <div id="adminMessage" class="admin-message hidden"></div>
 
     <footer class="help">
       <span class="pc-help"><kbd>WASD</kbd> / <kbd>↑↓←→</kbd> — движение</span>
@@ -35,14 +85,19 @@
       <span class="pc-help"><kbd>Z</kbd> в бою — рывок</span>
       <span class="pc-help"><kbd>M</kbd> — звук</span>
       <span class="touch-help">Кружок справа — движение: веди его, куда идти. Круг «ОК» слева — говорить, выбирать, бить и рывок. ↩ — назад.</span>
+      <span class="pc-help">«СОЗДАТЬ ЛОББИ» на титуле — игра с друзьями с других телефонов и компьютеров</span>
       <span class="hint">Совет: с боссами можно не драться, а договориться.</span>
     </footer>
-    <p class="tiny">Портреты персонажей — из присланных тобой картинок. Кликай по канвасу один раз, чтобы включить звук.</p>
+    <p class="tiny">101 место · 50 квестов · аккаунт, топы и админка — в меню на титуле. Кликай по канвасу один раз, чтобы включить звук.</p>
   </div>
 
-  <script src="audio.js"></script>
-  <script src="art.js"></script>
-  <script src="data.js"></script>
-  <script src="game.js"></script>
+  <script src="audio.js?v=20261123"></script>
+  <script src="art.js?v=20261123"></script>
+  <script src="data.js?v=20261123"></script>
+  <script src="mqtt.min.js?v=20261123"></script>
+  <script src="net.js?v=20261123"></script>
+  <script src="netui.js?v=20261123"></script>
+  <script src="account.js?v=20261123"></script>
+  <script src="game.js?v=20261123"></script>
 </body>
 </html>

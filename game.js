@@ -24,6 +24,11 @@
     im.src = b.portrait;
     G.images[b.id] = im;
   });
+  Object.keys(G.NEWCHARS || {}).forEach(id => {
+    const im = watchImage(new Image(), id);
+    im.src = G.NEWCHARS[id].img;
+    G.images[id] = im;
+  });
 
   /* ---------------- input ---------------- */
 
@@ -49,7 +54,9 @@
   const keymap = {
     arrowup: 'up', w: 'up', arrowdown: 'down', s: 'down',
     arrowleft: 'left', a: 'left', arrowright: 'right', d: 'right',
-    z: 'z', enter: 'z', ' ': 'z', x: 'x', escape: 'x', m: 'm'
+    z: 'z', enter: 'z', ' ': 'z', x: 'x', escape: 'x', m: 'm',
+    // second local player: IJKL move, U dash, O back
+    i: 'up2', k: 'down2', j: 'left2', l: 'right2', u: 'z2', o: 'x2'
   };
 
   function toggleMute() {
@@ -119,19 +126,26 @@
     btn.addEventListener('pointerleave', release);
   });
 
-  /* Right thumb stick: drag the knob and the hero walks that way. */
-  const stick = document.getElementById('stick');
-  const knob = document.getElementById('stickKnob');
-  if (stick && knob) {
-    let stickId = null;
+  /* Thumb sticks: drag the knob; a small tilt is slow, a full pull is full speed.
+     suffix '' = player 1 (red soul), suffix '2' = player 2 (purple soul). */
+  const stickVec2 = { x: 0, y: 0, active: false };
+  G.stickVec2 = stickVec2;
+
+  function setupStick(stickIdName, knobIdName, suffix, vec) {
+    const stick = document.getElementById(stickIdName);
+    const knob = document.getElementById(knobIdName);
+    if (!stick || !knob) return;
+    let pid = null;
+    const K = k => k + suffix;
     function setDir(k, on) {
-      if (on && !stickHeld[k]) {
-        if (!down[k]) pressed[k] = true;
-        stickHeld[k] = true;
-        down[k] = true;
-      } else if (!on && stickHeld[k]) {
-        stickHeld[k] = false;
-        down[k] = !!keyHeld[k];
+      const key = K(k);
+      if (on && !stickHeld[key]) {
+        if (!down[key]) pressed[key] = true;
+        stickHeld[key] = true;
+        down[key] = true;
+      } else if (!on && stickHeld[key]) {
+        stickHeld[key] = false;
+        down[key] = !!keyHeld[key];
       }
     }
     function moveStick(e) {
@@ -143,29 +157,27 @@
       const clamped = Math.min(rawLen, max);
       if (rawLen > 0) { dx = dx / rawLen * clamped; dy = dy / rawLen * clamped; }
       knob.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
-
-      // discrete keys: menu navigation (unchanged feel)
       const nx = dx / max, ny = dy / max, keyDead = 0.3;
       setDir('left', nx < -keyDead);
       setDir('right', nx > keyDead);
       setDir('up', ny < -keyDead);
       setDir('down', ny > keyDead);
-
-      // analog: a small tilt is a slow walk, a full pull is full speed
       const dead = 0.12;
       const mag = Math.max(0, (clamped / max - dead) / (1 - dead));
       const len = Math.hypot(dx, dy) || 1;
-      stickVec.x = dx / len * mag;
-      stickVec.y = dy / len * mag;
-      stickVec.active = mag > 0;
+      vec.x = dx / len * mag;
+      vec.y = dy / len * mag;
+      vec.active = mag > 0;
     }
-    function endStick() {
-      if (stickId === null) return;
-      stickId = null;
+    function endStick(e) {
+      if (e && e.pointerId !== undefined && e.pointerId !== pid) return;
+      if (pid === null) return;
+      try { stick.releasePointerCapture(pid); } catch (_) {}
+      pid = null;
       stick.classList.remove('active');
       knob.style.transform = 'translate(0,0)';
-      stickVec.x = stickVec.y = 0;
-      stickVec.active = false;
+      vec.x = vec.y = 0;
+      vec.active = false;
       ['up', 'down', 'left', 'right'].forEach(k => setDir(k, false));
       sleep();
     }
@@ -173,14 +185,14 @@
       e.preventDefault();
       AU.ensure();
       setInputMode(true);
-      stickId = e.pointerId;
+      pid = e.pointerId;
       stick.classList.add('active');
       try { stick.setPointerCapture(e.pointerId); } catch (_) {}
       wake();
       moveStick(e);
     });
     stick.addEventListener('pointermove', e => {
-      if (e.pointerId !== stickId) return;
+      if (e.pointerId !== pid) return;
       e.preventDefault();
       moveStick(e);
     });
@@ -188,20 +200,30 @@
     stick.addEventListener('pointercancel', endStick);
     stick.addEventListener('lostpointercapture', endStick);
   }
+  setupStick('stick', 'stickKnob', '', stickVec);
+  setupStick('stick2', 'stickKnob2', '2', stickVec2);
 
   /* Keyboard = digital (full speed), stick = analog (speed follows the tilt). */
-  function moveInput() {
+  function moveInput(suffix) {
+    suffix = suffix || '';
+    const vec = suffix === '2' ? stickVec2 : stickVec;
     let vx = 0, vy = 0, mag = 0;
-    if (stickVec.active) {
-      mag = Math.hypot(stickVec.x, stickVec.y);
-      if (mag) { vx = stickVec.x / mag; vy = stickVec.y / mag; }
+    if (vec.active) {
+      mag = Math.hypot(vec.x, vec.y);
+      if (mag) { vx = vec.x / mag; vy = vec.y / mag; }
     } else {
-      if (down.left) vx--; if (down.right) vx++;
-      if (down.up) vy--; if (down.down) vy++;
+      if (down['left' + suffix]) vx--; if (down['right' + suffix]) vx++;
+      if (down['up' + suffix]) vy--; if (down['down' + suffix]) vy++;
       mag = Math.hypot(vx, vy);
       if (mag) { vx /= mag; vy /= mag; mag = 1; }
     }
     return { vx, vy, mag };
+  }
+
+  /* One-shot key presses must never survive a frame, even on an early return. */
+  function clearPressed() {
+    pressed.up = pressed.down = pressed.left = pressed.right = pressed.z = pressed.x = pressed.m = false;
+    pressed.up2 = pressed.down2 = pressed.left2 = pressed.right2 = pressed.z2 = pressed.x2 = false;
   }
 
   function fit() {
@@ -222,7 +244,40 @@
   let state = 'title';
   let T = 0;
   let titleIndex = 0;
+  let liveTick = 0;
   let toast = { text: '', time: 0 };
+
+  /* ---------------- network play ---------------- */
+  const NET_COLORS = ['#8ff5ff', '#c77dff', '#ffe6a0', '#8affc8', '#ff9ec0', '#ff8f6a'];
+  let netMode = '';            // '' | 'host' | 'client'
+  let netPlayers = [];         // global order from lobby start
+  let netSelfIndex = 0;
+  let netInputs = {};          // id -> { v:{x,y,mag}, z:bool, x:bool }
+  let netSnap = null;          // latest host snapshot on clients
+  let netSendT = 0, netStateT = 0;
+  function netSelfColor() { return NET_COLORS[netSelfIndex % NET_COLORS.length]; }
+  function netInputFor(i) {
+    const p = netPlayers[i];
+    return p ? (netInputs[p.id] || null) : null;
+  }
+  function takeNetZ(i) {
+    const inp = netInputFor(i);
+    if (!inp || !inp.z) return false;
+    inp.z = false;
+    return true;
+  }
+  function resetNetSouls(b) {
+    if (!b) return;
+    const cx = b.arena.x + b.arena.w / 2;
+    b.netSouls = [];
+    for (let i = 2; i < netPlayers.length; i++) {
+      b.netSouls.push({
+        i, id: netPlayers[i].id, color: netPlayers[i].color,
+        x: cx + (i - 1) * 30 - 45, y: b.arena.y + b.arena.h - 32,
+        invuln: 0, dash: 0, dashCd: 0
+      });
+    }
+  }
 
   const game = {
     roomId: 'home', hp: 30, maxHp: 30, lov: 1, exp: 0, kills: 0, spares: 0,
@@ -230,7 +285,9 @@
     flags: {}, defeated: {}, spared: {},
     player: { x: 320, y: 410, dir: 'down', frame: 0, walkT: 0 },
     dialogue: null, battle: null, particles: [], fade: null,
-    messageTime: 0, message: ''
+    messageTime: 0, message: '',
+    coop: false, questsDone: 0, startedAt: 0,
+    p2: { x: 356, y: 410 }
   };
 
   function newGame() {
@@ -239,10 +296,126 @@
     game.kills = 0; game.spares = 0;
     game.inv = { pie: 2, tea: 1, candy: 3 };
     game.flags = {}; game.defeated = {}; game.spared = {};
+    game.questsDone = 0; game.startedAt = Date.now();
     game.player = { x: 320, y: 410, dir: 'down', frame: 0, walkT: 0 };
+    game.p2 = { x: 356, y: 410 };
     game.dialogue = null; game.battle = null; game.particles = []; game.fade = null;
     AU.setTrack('home');
     enterRoom('home', ROOMS.home.spawn, true);
+  }
+
+  G.startNetworkGame = function (role, startData) {
+    netMode = role === 'host' ? 'host' : 'client';
+    netInputs = {};
+    netSnap = null;
+    netSendT = netStateT = 0;
+    netPlayers = ((startData && startData.players) || []).map((p, i) => ({
+      id: p.id, nick: p.nick || 'ИГРОК', color: NET_COLORS[i % NET_COLORS.length],
+      x: 320 + (i % 2) * 36, y: 410
+    }));
+    if (!netPlayers.length) netPlayers = [{ id: G.net.selfId, nick: G.net.nick() || 'ГАЛЬКА', color: NET_COLORS[0], x: 320, y: 410 }];
+    netSelfIndex = Math.max(0, netPlayers.findIndex(p => p.id === G.net.selfId));
+    game.coop = netPlayers.length > 1;
+    document.body.classList.toggle('coop-mode', game.coop);
+    newGame();
+    state = 'world';
+    say([
+      { who: 'sys', text: 'СЕТЕВАЯ ИГРА. Код лобби висит в правом верхнем углу — зови друзей.' },
+      { who: 'gal', text: 'Опять восьмой год. Раз так — кричать будем вместе.' }
+    ]);
+  };
+
+  function netSnapshot() {
+    const b = game.battle;
+    return {
+      state, roomId: game.roomId,
+      hp: game.hp, maxHp: game.maxHp, lov: game.lov, exp: game.exp,
+      kills: game.kills, spares: game.spares,
+      inv: Object.assign({}, game.inv), flags: Object.assign({}, game.flags),
+      defeated: Object.assign({}, game.defeated), spared: Object.assign({}, game.spared),
+      questsDone: game.questsDone, startedAt: game.startedAt,
+      player: { x: game.player.x, y: game.player.y, dir: game.player.dir, frame: game.player.frame },
+      peers: netPlayers.map(p => ({ id: p.id, x: p.x, y: p.y })),
+      toast: toast.text,
+      dialogue: game.dialogue ? {
+        speaker: game.dialogue.speaker, lines: game.dialogue.lines.slice(),
+        i: game.dialogue.i, chars: game.dialogue.chars,
+        npcName: game.dialogue.npcName || '', imgKey: netImageKey(game.dialogue.img)
+      } : null,
+      battle: b ? {
+        bossId: b.boss.id, phase: b.phase, timer: b.timer, duration: b.duration,
+        enemyHp: b.enemyHp, enemyMax: b.enemyMax, phaseIdx: b.phaseIdx,
+        attackName: b.attackName, spareReady: b.spareReady, winType: b.winType,
+        menuIndex: b.menuIndex, sub: b.sub, subIndex: b.subIndex,
+        hx: b.hx, hy: b.hy, h2x: b.h2x, h2y: b.h2y,
+        invuln: b.invuln, h2Invuln: b.h2Invuln, dash: b.dash, h2Dash: b.h2Dash,
+        campMsg: b.campMsg,
+        bullets: b.bullets.map(p => ({ x: p.x, y: p.y, r: p.r, color: p.color, shape: p.shape, rot: p.rot })),
+        warns: b.warns.map(w => ({ x: w.x, y: w.y, w: w.w, h: w.h, life: w.life, max: w.max, color: w.color })),
+        souls: (b.netSouls || []).map(s => ({ x: s.x, y: s.y, invuln: s.invuln, dash: s.dash }))
+      } : null
+    };
+  }
+
+  function netImageKey(img) {
+    if (!img) return '';
+    for (const k in G.images) if (G.images[k] === img) return k;
+    return '';
+  }
+
+  function applyNetSnapshot(dt) {
+    const s = netSnap;
+    if (!s) return;
+    state = s.state || 'world';
+    game.roomId = ROOMS[s.roomId] ? s.roomId : 'home';
+    game.hp = s.hp; game.maxHp = s.maxHp; game.lov = s.lov; game.exp = s.exp || 0;
+    game.kills = s.kills || 0; game.spares = s.spares || 0;
+    game.inv = Object.assign({ pie: 0, tea: 0, candy: 0 }, s.inv);
+    game.flags = s.flags || {}; game.defeated = s.defeated || {}; game.spared = s.spared || {};
+    game.questsDone = s.questsDone || 0; game.startedAt = s.startedAt || Date.now();
+    if (s.player) Object.assign(game.player, s.player);
+    (s.peers || []).forEach((p, i) => {
+      if (!netPlayers[i]) return;
+      const target = i === 0 ? null : netPlayers[i];
+      if (!target) return;
+      const k = Math.min(1, dt * 14);
+      target.x += (p.x - target.x) * k;
+      target.y += (p.y - target.y) * k;
+    });
+    if (s.toast) toast = { text: s.toast, time: 1.8 };
+
+    if (s.dialogue) {
+      if (!game.dialogue || game.dialogue.sig !== JSON.stringify([s.dialogue.lines, s.dialogue.i])) {
+        game.dialogue = new Dialog(s.dialogue.speaker, s.dialogue.lines, null);
+        game.dialogue.sig = JSON.stringify([s.dialogue.lines, s.dialogue.i]);
+        game.dialogue.npcName = s.dialogue.npcName || '';
+        if (s.dialogue.imgKey && G.images[s.dialogue.imgKey]) game.dialogue.img = G.images[s.dialogue.imgKey];
+      }
+      game.dialogue.i = s.dialogue.i || 0;
+      game.dialogue.chars = s.dialogue.chars || 0;
+    } else game.dialogue = null;
+
+    if (s.battle) {
+      const boss = bossById(s.battle.bossId) || BOSSES[0];
+      if (!game.battle || game.battle.boss.id !== boss.id) game.battle = makeBattle(boss);
+      const b = game.battle;
+      Object.assign(b, {
+        phase: s.battle.phase, timer: s.battle.timer, duration: s.battle.duration,
+        enemyHp: s.battle.enemyHp, enemyMax: s.battle.enemyMax, phaseIdx: s.battle.phaseIdx || 0,
+        attackName: s.battle.attackName, spareReady: !!s.battle.spareReady, winType: s.battle.winType,
+        menuIndex: s.battle.menuIndex || 0, sub: s.battle.sub, subIndex: s.battle.subIndex || 0,
+        hx: s.battle.hx, hy: s.battle.hy, h2x: s.battle.h2x, h2y: s.battle.h2y,
+        invuln: s.battle.invuln, h2Invuln: s.battle.h2Invuln,
+        dash: s.battle.dash, h2Dash: s.battle.h2Dash, campMsg: s.battle.campMsg || 0
+      });
+      b.bullets = (s.battle.bullets || []).map(p => Object.assign({ age: 0, vx: 0, vy: 0, r: 5, color: '#fff', shape: 'circle', rot: 0 }, p));
+      b.warns = (s.battle.warns || []).map(w => Object.assign({ life: 0, max: 1, color: '#ff5d7d' }, w));
+      b.netSouls = (s.battle.souls || []).map((q, i) => ({
+        i: i + 2, color: NET_COLORS[(i + 2) % NET_COLORS.length],
+        x: q.x, y: q.y, invuln: q.invuln, dash: q.dash, dashCd: 0
+      }));
+      b.phase2 = b.phaseIdx >= 1; b.phase3 = b.phaseIdx >= 2;
+    } else game.battle = null;
   }
 
   function snapshot() {
@@ -251,7 +424,9 @@
       kills: game.kills, spares: game.spares, inv: Object.assign({}, game.inv),
       flags: Object.assign({}, game.flags), defeated: Object.assign({}, game.defeated),
       spared: Object.assign({}, game.spared),
-      player: { x: game.player.x, y: game.player.y }
+      questsDone: game.questsDone, startedAt: game.startedAt, coop: game.coop,
+      player: { x: game.player.x, y: game.player.y },
+      p2: { x: game.p2.x, y: game.p2.y }
     };
   }
 
@@ -273,8 +448,10 @@
         hp: d.hp, maxHp: d.maxHp, lov: d.lov, exp: d.exp || 0,
         kills: d.kills || 0, spares: d.spares || 0,
         inv: Object.assign({ pie: 0, tea: 0, candy: 0 }, d.inv),
-        flags: d.flags || {}, defeated: d.defeated || {}, spared: d.spared || {}
+        flags: d.flags || {}, defeated: d.defeated || {}, spared: d.spared || {},
+        questsDone: d.questsDone || 0, startedAt: d.startedAt || Date.now(), coop: !!d.coop
       });
+      game.p2 = { x: (d.p2 && d.p2.x) || 356, y: (d.p2 && d.p2.y) || 410 };
       game.hp = Math.max(1, Math.min(game.hp, game.maxHp));
       AU.setTrack(ROOMS[game.roomId].track);
       const savedPlayer = d.player || {};
@@ -292,6 +469,7 @@
       const r = ROOMS[id];
       game.player.x = spawn.x; game.player.y = spawn.y;
       game.player.frame = 0; game.player.walkT = 0;
+      game.p2.x = spawn.x + 36; game.p2.y = spawn.y;
       game.dialogue = null;
       AU.setTrack(r.track);
     };
@@ -435,17 +613,78 @@
     if (!solidAt(p.x - bw / 2, ny - bh / 2, bw, bh)) p.y = ny;
   }
 
-  function nearestNpc() {
+  function nearestNpc(x, y) {
+    const px = x == null ? game.player.x : x;
+    const py = y == null ? game.player.y : y;
     const list = ROOMS[game.roomId].npcs || [];
     let best = null, bd = 1e9;
     for (const n of list) {
-      const d = Math.hypot(n.x - game.player.x, n.y - game.player.y);
+      const d = Math.hypot(n.x - px, n.y - py);
       if (d < bd) { bd = d; best = n; }
     }
     return bd < 56 ? best : null;
   }
 
   function npcTalk(n) {
+    if (n.id === 'questLog') {
+      const done = game.questsDone || 0, total = (G.QUESTS || []).length;
+      say([
+        { who: 'sys', text: 'ВЫПОЛНЕНО КВЕСТОВ: ' + done + ' / ' + total },
+        { who: 'govnoed', text: done < total ? 'Ещё ' + (total - done) + ' заданий. Я помажусь, пока жду.' : 'Все выполнены. Можно мазаться.' },
+        { who: 'gal', text: 'Без объяснений. Иду дальше.' }
+      ]);
+      return;
+    }
+    if (n.warp) {
+      const w = n.warp;
+      say(n.lines || [{ who: 'sys', text: 'Ты пошла по указателю.' }], () => {
+        AU.sfx('door');
+        enterRoom(w.room, { x: w.x, y: w.y });
+      });
+      return;
+    }
+    if (n.questItem) {
+      const q = (G.QUESTS || []).find(x => x.id === n.questItem);
+      if (!q) return;
+      if (game.flags['qitem_' + q.id]) {
+        say([{ who: 'sys', text: q.item + ' уже у тебя. Отнеси ' + G.NEWCHARS[q.char].name + '.' }]);
+      } else {
+        game.flags['qitem_' + q.id] = true;
+        say([{ who: 'sys', text: '✦ НАЙДЕНО: ' + q.item + '. Отнеси ' + G.NEWCHARS[q.char].name + '.' }]);
+        showToast('✦ ' + q.item + ' — отнеси ' + G.NEWCHARS[q.char].name);
+        AU.sfx('save');
+      }
+      return;
+    }
+    if (n.quest) {
+      const q = (G.QUESTS || []).find(x => x.id === n.quest);
+      if (!q) return;
+      game.dialogue = null;
+      if (game.flags['qdone_' + q.id]) {
+        say([{ who: 'sys', text: 'Квест уже выполнен. ' + q.title }]);
+      } else if (game.flags['qitem_' + q.id]) {
+        game.flags['qdone_' + q.id] = true;
+        game.questsDone++;
+        game.maxHp += 2;
+        game.hp = Math.min(game.maxHp, game.hp + 2);
+        game.inv.candy = (game.inv.candy || 0) + 1;
+        say(q.doneLines);
+        showToast('✦ КВЕСТ: ' + q.title + '  (' + game.questsDone + '/' + G.QUESTS.length + ')');
+        AU.sfx('save');
+      } else {
+        game.flags['qstart_' + q.id] = true;
+        say(q.lines);
+      }
+      game.dialogue.img = G.images[q.char];
+      game.dialogue.npcName = G.NEWCHARS[q.char].name;
+      return;
+    }
+    if (n.char && G.NEWCHARS[n.char]) {
+      say(n.lines || G.NEWCHARS[n.char].lines, null, 'npc');
+      game.dialogue.npcName = n.name;
+      game.dialogue.img = G.images[n.char];
+      return;
+    }
     if (n.save) {
       game.hp = game.maxHp;
       saveGame();
@@ -490,6 +729,32 @@
         p.frame = 1 + Math.floor(p.walkT) % 2;
         movePlayer(vx * 132 * dt * mv.mag, vy * 132 * dt * mv.mag);
       } else p.frame = 0;
+
+      if (netMode === 'host' && netPlayers.length > 1) {
+        for (let i = 1; i < netPlayers.length; i++) {
+          const q = netPlayers[i], inp = netInputFor(i);
+          if (inp && inp.v && inp.v.mag > 0) {
+            const v = inp.v;
+            let nx = Math.max(14, Math.min(W - 14, q.x + v.x * 132 * dt * v.mag));
+            if (!solidAt(nx - 10, q.y - 6, 20, 12)) q.x = nx;
+            let ny = Math.max(30, Math.min(H - 16, q.y + v.y * 132 * dt * v.mag));
+            if (!solidAt(q.x - 10, ny - 6, 20, 12)) q.y = ny;
+          }
+          if (takeNetZ(i) && !game.dialogue) {
+            const n = nearestNpc(q.x, q.y);
+            if (n) { AU.sfx('select'); npcTalk(n); }
+          }
+        }
+        if (netPlayers[1]) { game.p2.x = netPlayers[1].x; game.p2.y = netPlayers[1].y; }
+      } else if (game.coop) {
+        const m2 = moveInput('2'), q = game.p2;
+        if (m2.mag > 0) {
+          let nx = Math.max(14, Math.min(W - 14, q.x + m2.vx * 132 * dt * m2.mag));
+          if (!solidAt(nx - 10, q.y - 6, 20, 12)) q.x = nx;
+          let ny = Math.max(30, Math.min(H - 16, q.y + m2.vy * 132 * dt * m2.mag));
+          if (!solidAt(q.x - 10, ny - 6, 20, 12)) q.y = ny;
+        }
+      }
 
       for (const ex of room.exits) {
         if (p.x > ex.x && p.x < ex.x + ex.w && p.y > ex.y && p.y < ex.y + ex.h) {
@@ -566,6 +831,33 @@
         A.px(ctx, n.x - 7, n.y - 3, 3, 3, '#ffe08a');
         A.px(ctx, n.x + 4, n.y - 3, 3, 3, '#ffe08a');
         A.px(ctx, n.x + 10, n.y + 2, 10, 3, '#23203a');
+      } else if (n.char && G.NEWCHARS[n.char]) {
+        const c = G.NEWCHARS[n.char];
+        A.drawChar(ctx, G.images[n.char], n.x, n.y + 18, 0, {
+          width: 44, height: 58, legH: 13,
+          legColor: c.dark, bootColor: '#111322', outline: c.color
+        });
+        A.text(ctx, c.name, n.x, n.y - 42, { size: 9, color: c.color, align: 'center', shadow: false });
+        if (n.quest) {
+          const ready = !!game.flags['qitem_' + n.quest];
+          const done = !!game.flags['qdone_' + n.quest];
+          A.text(ctx, done ? '✓' : ready ? '!' : '?', n.x + 22, n.y - 52 + Math.sin(T * 4) * 3, {
+            size: 16, color: done ? '#8affc8' : ready ? '#ffe08a' : '#ff9ec0', align: 'center'
+          });
+        }
+      } else if (n.questItem) {
+        const got = !!game.flags['qitem_' + n.questItem];
+        ctx.globalAlpha = got ? 0.35 : 1;
+        ctx.fillStyle = '#ffd98a';
+        ctx.shadowColor = '#ffcf6a'; ctx.shadowBlur = 12;
+        ctx.fillRect(n.x - 10, n.y - 6, 20, 14);
+        ctx.shadowBlur = 0;
+        A.text(ctx, got ? '✓' : '?', n.x, n.y - 16 + Math.sin(T * 5) * 2, { size: 13, color: '#fff', align: 'center' });
+        ctx.globalAlpha = 1;
+      } else if (n.warp) {
+        A.px(ctx, n.x - 3, n.y - 24, 6, 42, '#6a5a48');
+        A.px(ctx, n.x - 20, n.y - 30, 40, 18, '#3b4c5c');
+        A.text(ctx, '➜', n.x, n.y - 18, { size: 13, color: '#ffe6a0', align: 'center', shadow: false });
       } else {
         // little pupils: same pixel style, distinguishable by colours
         const girl = n.id === 'pupil2';
@@ -583,8 +875,29 @@
     A.drawChar(ctx, G.images.heroine, p.x, p.y + 16, p.frame, {
       width: 40, height: 52, legH: 13,
       legColor: '#304848', bootColor: '#202236',
-      outline: game.lov > 2 ? 'rgba(255,143,184,.75)' : 'rgba(255,255,255,.45)'
+      outline: netMode ? netSelfColor() : (game.lov > 2 ? 'rgba(255,143,184,.75)' : 'rgba(255,255,255,.45)')
     });
+    if (netMode) {
+      A.text(ctx, (netPlayers[netSelfIndex] || {}).nick || 'ТЫ', p.x, p.y - 34, {
+        size: 9, color: netSelfColor(), align: 'center', shadow: false
+      });
+      netPlayers.forEach((q, i) => {
+        if (i === 0) return;
+        A.drawChar(ctx, G.images.heroine, q.x, q.y + 16, 0, {
+          width: 40, height: 52, legH: 13,
+          legColor: i === 1 ? '#3a2a58' : '#243a52', bootColor: '#1b1630', outline: q.color
+        });
+        A.text(ctx, q.nick.slice(0, 8), q.x, q.y - 34, {
+          size: 9, color: q.color, align: 'center', shadow: false
+        });
+      });
+    } else if (game.coop) {
+      A.drawChar(ctx, G.images.heroine, game.p2.x, game.p2.y + 16, 0, {
+        width: 40, height: 52, legH: 13,
+        legColor: '#3a2a58', bootColor: '#1b1630', outline: 'rgba(199,125,255,.9)'
+      });
+      A.text(ctx, 'P2', game.p2.x, game.p2.y - 34, { size: 9, color: '#d9b3ff', align: 'center', shadow: false });
+    }
 
     drawParticles();
 
@@ -596,8 +909,9 @@
     A.px(ctx, 24, 42, 110, 4, '#22243c');
     A.px(ctx, 24, 42, 110 * Math.max(0, game.hp / game.maxHp), 4, '#ff5d7d');
 
-    A.panel(ctx, 430, 10, 198, 40, { fill: 'rgba(8,10,22,.85)', border: '#9fa8d8' });
-    A.text(ctx, room.name, 529, 28, { size: 12, color: '#e8ecff', align: 'center' });
+    A.panel(ctx, 430, 10, 198, 54, { fill: 'rgba(8,10,22,.85)', border: '#9fa8d8' });
+    A.text(ctx, room.name, 529, 26, { size: 11, color: '#e8ecff', align: 'center' });
+    A.text(ctx, 'КВЕСТЫ ' + (game.questsDone || 0) + '/' + ((G.QUESTS || []).length) + '  ·  МЕСТ ' + Object.keys(ROOMS).length, 529, 48, { size: 9, color: '#ffd98a', align: 'center', shadow: false });
     for (let i = 0; i < BOSSES.length; i++) {
       const b = BOSSES[i];
       A.px(ctx, 448 + i * 24, 40, 16, 5, game.spared[b.id] ? '#8affc8' : game.defeated[b.id] ? '#ff8fb8' : '#3a3d5c');
@@ -645,9 +959,11 @@
       phase: 'entrance', timer: 0, turn: 0, duration: 4.6,
       bullets: [], warns: [], schedule: [], spawnI: 0,
       hx: arena.x + arena.w / 2, hy: arena.y + arena.h - 32,
+      h2x: arena.x + arena.w / 2 + 36, h2y: arena.y + arena.h - 32,
       menuIndex: 0, sub: null, subIndex: 0,
       barPos: 0, barDir: 1, slash: 0, shake: 0, flash: 0,
       invuln: 0, dash: 0, dashCd: 0,
+      h2Invuln: 0, h2Dash: 0, h2DashCd: 0, netSouls: [],
       usedActs: {}, spareReady: false,
       phaseIdx: 0, phase2: false, phase3: false,
       attackName: '', attackKey: '',
@@ -659,6 +975,7 @@
 
   function startBattle(boss) {
     game.battle = makeBattle(boss);
+    resetNetSouls(game.battle);
     game.dialogue = null;
     state = 'battle';
     AU.setTrack(boss.id === 'huyet' ? 'huyet' : boss.id);
@@ -940,6 +1257,9 @@
     b.spawnI = 0;
     b.hx = b.arena.x + b.arena.w / 2;
     b.hy = b.arena.y + b.arena.h - 32;
+    b.h2x = b.arena.x + b.arena.w / 2 + 36;
+    b.h2y = b.arena.y + b.arena.h - 32;
+    resetNetSouls(b);
     b.schedule = buildSchedule(b);
     b.duration = (b.schedule.length ? b.schedule[b.schedule.length - 1].t : 3) + 1.6;
     AU.sfx('charge');
@@ -1055,6 +1375,7 @@
     state = 'ending';
     game.battle = null;
     AU.setTrack('ending');
+    if (G.accounts && G.accounts.recordCompletion) G.accounts.recordCompletion(game);
     const s = game.spares;
     let lines;
     if (s === BOSSES.length) {
@@ -1088,6 +1409,9 @@
     b.invuln = Math.max(0, b.invuln - dt);
     b.dash = Math.max(0, b.dash - dt);
     b.dashCd = Math.max(0, b.dashCd - dt);
+    b.h2Invuln = Math.max(0, (b.h2Invuln || 0) - dt);
+    b.h2Dash = Math.max(0, (b.h2Dash || 0) - dt);
+    b.h2DashCd = Math.max(0, (b.h2DashCd || 0) - dt);
     b.slash = Math.max(0, b.slash - dt);
     b.shake = Math.max(0, b.shake - dt * 45);
     b.flash = Math.max(0, b.flash - dt * 2.5);
@@ -1112,6 +1436,44 @@
         b.dash = 0.2; b.dashCd = 1.5; b.invuln = Math.max(b.invuln, 0.25);
         burst(b.hx, b.hy, '#8ff5ff', 10, 60);
         AU.sfx('bullet');
+      }
+
+      // Player 2 (purple soul). Local IJKL/stick, or a network guest; shared HP pool.
+      if (game.coop) {
+        let m2 = moveInput('2');
+        let dash2 = pressed.z2;
+        if (netMode === 'host' && netPlayers[1]) {
+          const inp = netInputFor(1);
+          m2 = inp && inp.v ? { vx: inp.v.x, vy: inp.v.y, mag: inp.v.mag } : { vx: 0, vy: 0, mag: 0 };
+          dash2 = takeNetZ(1);
+        }
+        const s2 = (b.h2Dash > 0 ? 430 : 168) * dt * m2.mag;
+        b.h2x = Math.max(A0.x + 12, Math.min(A0.x + A0.w - 12, b.h2x + m2.vx * s2));
+        b.h2y = Math.max(A0.y + 12, Math.min(A0.y + A0.h - 12, b.h2y + m2.vy * s2));
+        if (dash2 && b.dashUnlocked && b.h2DashCd <= 0) {
+          b.h2Dash = 0.2; b.h2DashCd = 1.5; b.h2Invuln = Math.max(b.h2Invuln, 0.25);
+          burst(b.h2x, b.h2y, netMode ? netPlayers[1].color : '#c77dff', 10, 60);
+          AU.sfx('bullet');
+        }
+      }
+
+      // Network guests 3-6: each controls its own soul, all share one HP pool.
+      if (netMode === 'host' && b.netSouls) {
+        b.netSouls.forEach(s => {
+          s.invuln = Math.max(0, s.invuln - dt);
+          s.dash = Math.max(0, s.dash - dt);
+          s.dashCd = Math.max(0, s.dashCd - dt);
+          const inp = netInputFor(s.i);
+          if (inp && inp.v && inp.v.mag > 0) {
+            const sp = (s.dash > 0 ? 430 : 168) * dt * inp.v.mag;
+            s.x = Math.max(A0.x + 12, Math.min(A0.x + A0.w - 12, s.x + inp.v.x * sp));
+            s.y = Math.max(A0.y + 12, Math.min(A0.y + A0.h - 12, s.y + inp.v.y * sp));
+          }
+          if (takeNetZ(s.i) && b.dashUnlocked && s.dashCd <= 0) {
+            s.dash = 0.2; s.dashCd = 1.5; s.invuln = Math.max(s.invuln, 0.25);
+            burst(s.x, s.y, s.color, 10, 60);
+          }
+        });
       }
 
       // Standing in a corner is never free: after a short warning the boss
@@ -1207,6 +1569,37 @@
             state = 'gameover';
             AU.setTrack('title');
             return;
+          }
+        } else if (game.coop && b.h2Invuln <= 0 && Math.hypot(p.x - b.h2x, p.y - b.h2y) < p.r + 7) {
+          const dmg2 = Math.max(1, Math.round(b.boss.atk * (game.spared[b.boss.id] ? 0.5 : 0.85)));
+          game.hp -= dmg2;
+          b.h2Invuln = 1.0;
+          b.shake = 16;
+          b.flash = 0.7;
+          AU.sfx('hurt');
+          burst(b.h2x, b.h2y, '#c77dff', 18);
+          if (game.hp <= 0) {
+            game.hp = 0;
+            state = 'gameover';
+            AU.setTrack('title');
+            return;
+          }
+        } else if (netMode === 'host' && b.netSouls) {
+          for (const s of b.netSouls) {
+            if (s.invuln <= 0 && Math.hypot(p.x - s.x, p.y - s.y) < p.r + 7) {
+              const dmg3 = Math.max(1, Math.round(b.boss.atk * (game.spared[b.boss.id] ? 0.5 : 0.85)));
+              game.hp -= dmg3;
+              s.invuln = 1.0; b.shake = 16; b.flash = 0.7;
+              AU.sfx('hurt');
+              burst(s.x, s.y, s.color, 18);
+              if (game.hp <= 0) {
+                game.hp = 0;
+                state = 'gameover';
+                AU.setTrack('title');
+                return;
+              }
+              break;
+            }
           }
         }
       }
@@ -1344,6 +1737,12 @@
     A.text(ctx, 'HP ' + game.hp + '/' + game.maxHp, 508, 57, { size: 12, color: '#ff9fb0' });
     A.px(ctx, 480, 66, 128, 4, '#22243c');
     A.px(ctx, 480, 66, 128 * Math.max(0, game.hp / game.maxHp), 4, '#ff5d7d');
+    if (game.coop) {
+      A.panel(ctx, 470, 78, 150, 24, { fill: 'rgba(8,10,22,.85)', border: '#9b7ad8' });
+      A.heart(ctx, 488, 91, 10, '#c77dff', T * 5);
+      A.text(ctx, 'P2', 502, 88, { size: 10, color: '#fff' });
+      A.text(ctx, 'ОБЩЕЕ HP ' + game.hp, 502, 98, { size: 9, color: '#d9b3ff', shadow: false });
+    }
 
     // arena
     const ar = b.arena;
@@ -1402,14 +1801,30 @@
     });
 
     if (b.phase === 'dodge' || b.phase === 'hitwait') {
+      const c1 = netMode ? (netPlayers[0] || {}).color || NET_COLORS[0] : (game.spared[b.boss.id] ? '#8affc8' : '#ff4d6d');
       if (b.invuln <= 0 || Math.floor(T * 16) % 2 === 0) {
-        A.heart(ctx, b.hx, b.hy, 17, game.spared[b.boss.id] ? '#8affc8' : '#ff4d6d', T * 6);
+        A.heart(ctx, b.hx, b.hy, 17, c1, T * 6);
       }
       if (b.dash > 0) {
         ctx.globalAlpha = 0.4;
         A.heart(ctx, b.hx, b.hy + 12, 14, '#8ff5ff', 0);
         ctx.globalAlpha = 1;
       }
+      if (game.coop) {
+        const c2 = netMode ? (netPlayers[1] || {}).color || NET_COLORS[1] : '#c77dff';
+        if (b.h2Invuln <= 0 || Math.floor(T * 16) % 2 === 0) {
+          A.heart(ctx, b.h2x, b.h2y, 17, c2, T * 6 + 1.3);
+        }
+        if (b.h2Dash > 0) {
+          ctx.globalAlpha = 0.4;
+          A.heart(ctx, b.h2x, b.h2y + 12, 14, c2, 0);
+          ctx.globalAlpha = 1;
+        }
+      }
+      (b.netSouls || []).forEach(s => {
+        if (s.invuln <= 0 || Math.floor(T * 16) % 2 === 0) A.heart(ctx, s.x, s.y, 17, s.color, T * 6 + s.i);
+        if (s.dash > 0) { ctx.globalAlpha = 0.4; A.heart(ctx, s.x, s.y + 12, 14, s.color, 0); ctx.globalAlpha = 1; }
+      });
     }
     ctx.restore();
 
@@ -1500,6 +1915,15 @@
 
   /* ---------------- title / gameover / ending ---------------- */
 
+  function titleOptions() {
+    const opts = ['НОВАЯ ИГРА'];
+    if (hasSave()) opts.push('ПРОДОЛЖИТЬ');
+    opts.push('АККАУНТ И ТОПЫ');
+    opts.push('СОЗДАТЬ ЛОББИ');
+    opts.push('ВОЙТИ ПО КОДУ');
+    return opts;
+  }
+
   function drawTitle() {
     const g = ctx.createLinearGradient(0, 0, 0, 480);
     g.addColorStop(0, '#1b1236'); g.addColorStop(0.6, '#0e1228'); g.addColorStop(1, '#070814');
@@ -1523,11 +1947,15 @@
     A.text(ctx, 'ПОДЗЕМНЫЙ РИТМ', 320, 128, { size: 17, color: '#ffb3ce', align: 'center' });
     A.px(ctx, 170, 142, 300, 2, '#6e5a9c');
 
-    const opts = hasSave() ? ['НОВАЯ ИГРА', 'ПРОДОЛЖИТЬ'] : ['НОВАЯ ИГРА'];
+    const opts = titleOptions();
     opts.forEach((o, i) => {
-      const y = 316 + i * 34;
+      const y = 292 + i * 28;
       const sel = titleIndex === i;
-      A.text(ctx, (sel ? '▶ ' : '   ') + o, 320, y, { size: 18, color: sel ? '#ffe6a0' : '#aab3dd', align: 'center', shadow: false });
+      A.text(ctx, (sel ? '▶ ' : '   ') + o, 320, y, { size: 16, color: sel ? '#ffe6a0' : '#aab3dd', align: 'center', shadow: false });
+    });
+    const netOnline = G.net && G.net.status() === 'online';
+    A.text(ctx, 'ЛОББИ: ' + (netOnline ? 'СЕРВЕР НА СВЯЗИ · ' + (G.netui ? G.netui.lobbyCount() : 0) + ' АКТИВНЫХ' : 'НЕТ СВЯЗИ — ПРОВЕРЬ ИНТЕРНЕТ'), 320, 222, {
+      size: 9, color: netOnline ? '#8affc8' : '#ff9ec0', align: 'center', shadow: false
     });
 
     // boss thumbnails
@@ -1540,7 +1968,7 @@
       A.text(ctx, b.name.length > 10 ? b.name.slice(0, 9) + '…' : b.name, x + 31, 465, { size: 9, color: beaten ? b.colors.light : '#8790bb', align: 'center' });
       if (beaten) A.text(ctx, game.spared[b.id] ? '♥' : '×', x + 56, 397, { size: 14, color: game.spared[b.id] ? '#8affc8' : '#ff8fb8', align: 'center' });
     });
-    A.text(ctx, '13 ЛОКАЦИЙ · 5 БОССОВ ПО 3 ФАЗЫ · ГАЛЬКЕ 59 · НЕ ПРЯЧЬСЯ В УГЛУ', 320, 355, { size: 10, color: '#8e98c6', align: 'center' });
+    A.text(ctx, Object.keys(ROOMS).length + ' МЕСТ · ' + (G.QUESTS || []).length + ' КВЕСТОВ · 5 БОССОВ ПО 3 ФАЗЫ · ГАЛЬКЕ 59', 320, 158, { size: 10, color: '#8e98c6', align: 'center' });
   }
 
   function drawGameOver() {
@@ -1561,14 +1989,65 @@
     T += dt;
     toast.time = Math.max(0, toast.time - dt);
 
+    if (G.netui && G.netui.isOpen && G.netui.isOpen()) {
+      clearPressed();
+      return;
+    }
+
+    const ACC = G.accounts;
+    if (ACC) {
+      if (ACC.isOpen && ACC.isOpen()) {
+        clearPressed();
+        return;
+      }
+      if (ACC.tick && ACC.tick()) {
+        clearPressed();
+        return;
+      }
+      liveTick += dt;
+      if (liveTick >= 1) {
+        liveTick = 0;
+        if (ACC.updateLive) ACC.updateLive(game);
+      }
+    }
+
+    if (netMode) {
+      netSendT += dt;
+      if (netSendT >= 0.07) {
+        netSendT = 0;
+        const mv = moveInput();
+        G.net.sendInput({ v: { x: mv.vx, y: mv.vy, mag: mv.mag }, z: !!pressed.z, x: !!pressed.x });
+      }
+    }
+
+    if (netMode === 'client') {
+      applyNetSnapshot(dt);
+      updateParticles(dt);
+      clearPressed();
+      return;
+    }
+
     if (state === 'title') {
-      const n = hasSave() ? 2 : 1;
+      const opts = titleOptions(), n = opts.length;
+      if (titleIndex >= n) titleIndex = 0;
       if (pressed.up) { titleIndex = (titleIndex - 1 + n) % n; AU.sfx('move'); }
       if (pressed.down) { titleIndex = (titleIndex + 1) % n; AU.sfx('move'); }
       if (pressed.z) {
         AU.ensure(); AU.sfx('select');
-        if (titleIndex === 0 || !hasSave()) newGame();
-        else if (!loadGame()) newGame();
+        const o = opts[titleIndex];
+        if (o.indexOf('АККАУНТ') === 0) {
+          if (G.accounts && G.accounts.open) G.accounts.open();
+          clearPressed();
+          return;
+        }
+        if (o === 'СОЗДАТЬ ЛОББИ' || o === 'ВОЙТИ ПО КОДУ') {
+          if (G.netui && G.netui.open) G.netui.open();
+          clearPressed();
+          return;
+        }
+        if (o === 'ПРОДОЛЖИТЬ') { if (!loadGame()) newGame(); }
+        else newGame();
+        document.body.classList.toggle('coop-mode', game.coop);
         state = 'world';
         if (!game.dialogue) {
           say([{ who: 'sys', text: 'Галька проснулась. Восьмой год в школе. Шестой — с классом 6 «И». Сегодня опять кричать.' },
@@ -1592,6 +2071,14 @@
       if (game.dialogue) game.dialogue.update(dt);
     }
 
+    if (netMode === 'host') {
+      netStateT += dt;
+      if (netStateT >= 0.08) {
+        netStateT = 0;
+        G.net.sendState(netSnapshot());
+      }
+    }
+
     updateParticles(dt);
 
     if (game.fade) {
@@ -1605,7 +2092,10 @@
       }
     }
 
-    pressed.up = pressed.down = pressed.left = pressed.right = pressed.z = pressed.x = pressed.m = false;
+    if (netMode === 'host') {
+      Object.keys(netInputs).forEach(id => { if (netInputs[id]) netInputs[id].z = false; });
+    }
+    clearPressed();
   }
 
   function draw() {
@@ -1642,8 +2132,21 @@
   }
   requestAnimationFrame(loop);
 
+  G.net.on('input', d => { netInputs[d.id] = d.data; });
+  G.net.on('state', s => { netSnap = s; });
+  G.net.on('left', () => {
+    netMode = ''; netPlayers = []; netInputs = {}; netSnap = null;
+    game.coop = false;
+    document.body.classList.remove('coop-mode');
+  });
+
   G.debug = {
     game, startBattle, bossById, getState: () => state, say, makeBattle, buildSchedule,
+    netInfo: () => ({
+      mode: netMode, selfIndex: netSelfIndex,
+      players: netPlayers.map(p => ({ id: p.id, nick: p.nick, x: Math.round(p.x), y: Math.round(p.y), color: p.color })),
+      hasSnapshot: !!netSnap, inputs: Object.keys(netInputs).length
+    }),
     step: (dt, key) => { if (key) pressed[key] = true; update(dt || 0.016); draw(); },
     stepMany: (n, dt, key) => {
       for (let i = 0; i < (n || 1); i++) {

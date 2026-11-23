@@ -349,11 +349,19 @@
     kiosk:     { sky: '#141a2c', far: '#25314b', ground: '#2e3548', edge: '#a9c0ff', dot: '#fff0c0' },
     vestibule: { sky: '#0d1722', far: '#1b3242', ground: '#223a48', edge: '#5ad8c0', dot: '#a8ffec' },
     tunnel:    { sky: '#09121d', far: '#122a3a', ground: '#17303e', edge: '#35d8d0', dot: '#8fffe0' },
-    staffroom: { sky: '#1d1628', far: '#312540', ground: '#403345', edge: '#d8a860', dot: '#ffd9ec' }
+    staffroom: { sky: '#1d1628', far: '#312540', ground: '#403345', edge: '#d8a860', dot: '#ffd9ec' },
+    path:      { sky: '#101426', far: '#222a44', ground: '#2b3046', edge: '#8fa0d0', dot: '#ffe0a8' },
+    hub:       { sky: '#161027', far: '#2c2246', ground: '#332a48', edge: '#c77dff', dot: '#ffd98a' },
+    dvor:      { sky: '#101c1f', far: '#1e3730', ground: '#2b3b32', edge: '#8fd0a0', dot: '#c8ffd0' },
+    podezd:    { sky: '#121522', far: '#252b42', ground: '#303448', edge: '#9aa8d8', dot: '#ffe6a0' },
+    cherdak:   { sky: '#171222', far: '#2c2340', ground: '#3a2f48', edge: '#d8b878', dot: '#ffd9ec' },
+    podval:    { sky: '#0b1118', far: '#172430', ground: '#1d2c36', edge: '#6fa8b8', dot: '#a8e0e8' },
+    sport:     { sky: '#141c24', far: '#243648', ground: '#2e4250', edge: '#ff9ec0', dot: '#fff0c0' },
+    labor:     { sky: '#181418', far: '#30242c', ground: '#3b2e34', edge: '#d8a860', dot: '#ffe0b0' }
   };
 
   art.drawRoom = function (ctx, id, t, Gstate) {
-    const p = roomPal[id] || roomPal.path;
+    const p = roomPal[id] || roomPal[id.replace(/\d+$/, '')] || roomPal.path;
     const rnd = art.rand(id.length * 977 + id.charCodeAt(0) * 31);
     art.px(ctx, 0, 0, 640, 480, p.sky);
 

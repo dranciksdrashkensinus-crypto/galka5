@@ -226,3 +226,146 @@ body.touch-mode .touch-help { display: inline; }
     margin: 0 10px 4px;
   }
 }
+
+/* ---------------- local co-op ---------------- */
+.hidden { display: none !important; }
+body.touch-mode .btn-p2 { display: none; }
+body.touch-mode.coop-mode .btn-p2 {
+  display: block;
+  width: 46px;
+  height: 46px;
+  font-size: 13px;
+  border-color: rgba(199,125,255,.9);
+  background: rgba(66,32,100,.88);
+}
+body.touch-mode .stick2 { display: none; }
+body.touch-mode.coop-mode .stick2 {
+  display: block;
+  top: 70%;
+  border-color: rgba(199,125,255,.7);
+  background: radial-gradient(circle, rgba(160,90,220,.2) 0%, rgba(10,12,24,.5) 70%);
+}
+body.touch-mode.coop-mode .stick2.active { border-color: #c77dff; }
+body.touch-mode.coop-mode .stick2 .stick-knob { background: rgba(199,125,255,.75); }
+
+/* ---------------- network lobby ---------------- */
+.net-hud {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 12;
+  max-width: 210px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255,230,160,.8);
+  border-radius: 5px;
+  background: rgba(6,8,20,.82);
+  color: #e8ecff;
+  font: 700 11px "Consolas", monospace;
+  text-align: right;
+  pointer-events: none;
+}
+.net-code b { color: #ffe6a0; font-size: 15px; letter-spacing: 2px; }
+.net-roster { margin-top: 3px; color: #8affc8; font-size: 10px; line-height: 1.35; }
+.lobby-big-code {
+  margin: 8px 0;
+  padding: 10px;
+  border: 2px solid #ffe6a0;
+  background: rgba(90,60,10,.35);
+  color: #ffe6a0;
+  font: 700 20px "Consolas", monospace;
+  letter-spacing: 5px;
+  text-align: center;
+}
+.lobby-row { padding: 7px 10px; border-bottom: 1px solid #2b3152; font-size: 12px; }
+.lobby-row b { color: #ffe6a0; letter-spacing: 2px; }
+.lobby-row button { margin-left: 8px; }
+.lobby-self { color: #8affc8; }
+
+/* ---------------- accounts / tops / admin ---------------- */
+.account-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: rgba(4,5,14,.88);
+  backdrop-filter: blur(3px);
+}
+.account-card {
+  position: relative;
+  width: min(640px, 100%);
+  max-height: 92vh;
+  overflow: auto;
+  padding: 18px 18px 20px;
+  border: 2px solid #9fa8d8;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #171a34, #0c0e20);
+  box-shadow: 0 14px 50px rgba(0,0,0,.75);
+  font-size: 13px;
+  color: #e8ecff;
+}
+.account-card h2 { margin: 0 0 10px; font-size: 18px; color: #ffe6a0; letter-spacing: 1px; }
+.acc-close {
+  position: absolute; right: 8px; top: 6px;
+  width: 30px; height: 30px;
+  border: 0; background: transparent; color: #ff9ec0; font-size: 24px; cursor: pointer;
+}
+.acc-msg { min-height: 18px; margin-bottom: 8px; color: #8affc8; font-size: 12px; }
+.acc-msg.bad { color: #ff8fb8; }
+.acc-tabs, .top-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.acc-tabs button, .top-tabs button, .acc-buttons button, .admin-actions button {
+  border: 1px solid #6e77a8;
+  background: #20264a;
+  color: #dfe6ff;
+  padding: 7px 10px;
+  font: 700 11px "Consolas", monospace;
+  cursor: pointer;
+}
+.acc-tabs button.active, .top-tabs button.active { background: #ff5d8f; border-color: #ffb3ce; color: #fff; }
+.acc-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 6px; }
+.acc-buttons .primary { background: #8a2d56; border-color: #ff8fb8; }
+.account-card label { display: block; margin: 9px 0; color: #b9c2e8; }
+.account-card input {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px;
+  box-sizing: border-box;
+  border: 1px solid #7b84b8;
+  background: #0a0d1e;
+  color: #fff;
+  font: 14px "Consolas", monospace;
+}
+.acc-note { color: #8e98c6; font-size: 11px; line-height: 1.4; }
+.acc-note.bad { color: #ff8fb8; }
+.acc-list { max-height: 44vh; overflow: auto; border: 1px solid #41486f; background: rgba(6,8,20,.6); }
+.top-row, .admin-row { padding: 8px 10px; border-bottom: 1px solid #2b3152; }
+.top-row b { color: #ffe6a0; }
+.top-row span { float: right; color: #ffd98a; }
+.admin-name { font-weight: 700; color: #fff; }
+.admin-name small { color: #8affc8; font-size: 10px; }
+.admin-progress { color: #aab3dd; font-size: 11px; margin-top: 3px; }
+.admin-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.admin-actions button { padding: 5px 7px; font-size: 10px; }
+.acc-empty { padding: 18px; text-align: center; color: #ff9ec0; line-height: 1.6; }
+.admin-message {
+  position: fixed;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  z-index: 40;
+  max-width: min(620px, 94vw);
+  padding: 10px 14px;
+  border: 2px solid #ff6d8f;
+  background: rgba(60,8,20,.95);
+  color: #ffe6f0;
+  font: 700 13px "Consolas", monospace;
+  text-align: center;
+  box-shadow: 0 6px 24px rgba(0,0,0,.7);
+}
+body.touch-mode .account-card { font-size: 14px; }
+body.touch-mode .account-card input { font-size: 16px; }
+body.touch-mode .acc-tabs button, body.touch-mode .top-tabs button,
+body.touch-mode .acc-buttons button, body.touch-mode .admin-actions button { font-size: 12px; padding: 9px 12px; }
