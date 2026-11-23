@@ -263,6 +263,7 @@
   let netInputs = {};          // id -> { v:{x,y,mag}, z:bool, x:bool }
   let netSnap = null;          // latest host snapshot on clients
   let netLastSnapRef = null;   // only correct positions when a NEW snapshot arrives
+  let netSnapSeq = 0, netAppliedSeq = 0, netLastRoom = '';
   let netSendT = 0, netStateT = 0;
   let netDialogueSig = '', netDialogueDismissed = '';
   function netSelfColor() { return NET_COLORS[netSelfIndex % NET_COLORS.length]; }
@@ -296,7 +297,8 @@
     player: { x: 320, y: 410, dir: 'down', frame: 0, walkT: 0 },
     dialogue: null, battle: null, particles: [], fade: null,
     messageTime: 0, message: '',
-    questsDone: 0, startedAt: 0
+    questsDone: 0, startedAt: 0,
+    godRuns: 0, godBaseMaxHp: 0
   };
 
   function newGame() {
@@ -306,6 +308,7 @@
     game.inv = { pie: 2, tea: 1, candy: 3 };
     game.flags = {}; game.defeated = {}; game.spared = {};
     game.questsDone = 0; game.startedAt = Date.now();
+    game.godRuns = 0; game.godBaseMaxHp = 0;
     game.player = { x: 320, y: 410, dir: 'down', frame: 0, walkT: 0 };
     game.dialogue = null; game.battle = null; game.particles = []; game.fade = null;
     AU.setTrack('home');
@@ -317,6 +320,7 @@
     netInputs = {};
     netSnap = null;
     netLastSnapRef = null;
+    netSnapSeq = 0; netAppliedSeq = 0; netLastRoom = '';
     netSendT = netStateT = 0;
     netPlayers = ((startData && startData.players) || []).map((p, i) => ({
       id: p.id, nick: p.nick || 'ИГРОК', color: NET_COLORS[i % NET_COLORS.length],
@@ -334,15 +338,23 @@
 
   function netSnapshot() {
     const b = game.battle;
+    const lob = G.net.lobby && G.net.lobby();
     return {
+      seq: ++netSnapSeq, lobby: lob ? lob.code : '',
       state, roomId: game.roomId,
       hp: game.hp, maxHp: game.maxHp, lov: game.lov, exp: game.exp,
       kills: game.kills, spares: game.spares,
       inv: Object.assign({}, game.inv), flags: Object.assign({}, game.flags),
       defeated: Object.assign({}, game.defeated), spared: Object.assign({}, game.spared),
       questsDone: game.questsDone, startedAt: game.startedAt,
+      godRuns: game.godRuns, godBaseMaxHp: game.godBaseMaxHp,
       player: { x: game.player.x, y: game.player.y, dir: game.player.dir, frame: game.player.frame },
-      peers: netPlayers.map(p => ({ id: p.id, x: p.x, y: p.y })),
+      /* The host's own entry must carry the live player position too. */
+      peers: netPlayers.map((p, i) => ({
+        id: p.id,
+        x: i === netSelfIndex ? game.player.x : p.x,
+        y: i === netSelfIndex ? game.player.y : p.y
+      })),
       toast: toast.text,
       dialogue: game.dialogue ? {
         speaker: game.dialogue.speaker, lines: game.dialogue.lines.slice(),
@@ -359,7 +371,7 @@
         campMsg: b.campMsg,
         bullets: b.bullets.map(p => ({ x: p.x, y: p.y, r: p.r, color: p.color, shape: p.shape, rot: p.rot })),
         warns: b.warns.map(w => ({ x: w.x, y: w.y, w: w.w, h: w.h, life: w.life, max: w.max, color: w.color })),
-        souls: (b.netSouls || []).map(s => ({ x: s.x, y: s.y, invuln: s.invuln, dash: s.dash }))
+        souls: (b.netSouls || []).map(s => ({ id: s.id, x: s.x, y: s.y, invuln: s.invuln, dash: s.dash }))
       } : null
     };
   }
@@ -378,7 +390,8 @@
        every frame is what made guests feel rubber-banded into a tiny circle. */
     const fresh = s !== netLastSnapRef;
     if (fresh) netLastSnapRef = s;
-    const roomChanged = ROOMS[s.roomId] && s.roomId !== game.roomId;
+    const roomChanged = ROOMS[s.roomId] && s.roomId !== netLastRoom;
+    if (ROOMS[s.roomId]) netLastRoom = s.roomId;
     state = s.state || 'world';
     game.roomId = ROOMS[s.roomId] ? s.roomId : 'home';
     game.hp = s.hp; game.maxHp = s.maxHp; game.lov = s.lov; game.exp = s.exp || 0;
@@ -386,37 +399,36 @@
     game.inv = Object.assign({ pie: 0, tea: 0, candy: 0 }, s.inv);
     game.flags = s.flags || {}; game.defeated = s.defeated || {}; game.spared = s.spared || {};
     game.questsDone = s.questsDone || 0; game.startedAt = s.startedAt || Date.now();
+    game.godRuns = s.godRuns || 0; game.godBaseMaxHp = s.godBaseMaxHp || 0;
     if (roomChanged) {
       game.dialogue = null;
       netDialogueSig = ''; netDialogueDismissed = '';
       game.player.frame = 0; game.player.walkT = 0;
       AU.setTrack(ROOMS[game.roomId].track);
     }
-    /* s.player is the HOST. The guest's own soul is its entry in s.peers. */
-    if (s.player && netPlayers[0]) {
-      netPlayers[0].x = s.player.x;
-      netPlayers[0].y = s.player.y;
-    }
-    const ownPeer = s.peers && s.peers[netSelfIndex];
-    if (ownPeer && (fresh || roomChanged)) {
-      if (roomChanged) {
-        game.player.x = ownPeer.x; game.player.y = ownPeer.y;
-      } else {
-        /* A small nudge once per packet, not every frame. */
-        const k = 0.12;
-        game.player.x += (ownPeer.x - game.player.x) * k;
-        game.player.y += (ownPeer.y - game.player.y) * k;
+    /* Match by player ID, never by array index — a late join or a different
+       roster order used to put two Гальки on top of each other. */
+    const peers = s.peers || [];
+    const peerFor = id => peers.find(p => p.id === id);
+    const selfId = G.net.selfId;
+    netPlayers.forEach(q => {
+      const p = peerFor(q.id);
+      if (!p) return;
+      if (q.id === selfId) {
+        if (!roomChanged) return; // own soul is handled below with prediction
+        game.player.x = p.x; game.player.y = p.y;
+        return;
       }
-    }
-    if (fresh || roomChanged) (s.peers || []).forEach((p, i) => {
-      const target = netPlayers[i];
-      if (!target) return;
-      if (netMode === 'host' && i === 0) return;  // host is s.player
-      if (netMode === 'client' && i === netSelfIndex) return; // own soul
       const k = roomChanged ? 1 : 0.35;
-      target.x += (p.x - target.x) * k;
-      target.y += (p.y - target.y) * k;
+      q.x += (p.x - q.x) * k;
+      q.y += (p.y - q.y) * k;
     });
+    const ownPeer = peerFor(selfId) || (s.player && netPlayers[0] && netPlayers[0].id === selfId ? s.player : null);
+    if (ownPeer && !roomChanged && fresh) {
+      const k = 0.12;
+      game.player.x += (ownPeer.x - game.player.x) * k;
+      game.player.y += (ownPeer.y - game.player.y) * k;
+    }
     /* Dialogue/text work only when a new packet arrives — on a phone doing
        this 60 times a second for the same text was a noticeable slowdown. */
     if (fresh || roomChanged) {
@@ -468,10 +480,10 @@
         b.bullets = (s.battle.bullets || []).map(p => Object.assign({ age: 0, vx: 0, vy: 0, r: 5, color: '#fff', shape: 'circle', rot: 0 }, p));
         b.warns = (s.battle.warns || []).map(w => Object.assign({ life: 0, max: 1, color: '#ff5d7d' }, w));
         b.netSouls = (s.battle.souls || []).map((q, i) => {
-          const old = (b.netSouls || [])[i];
-          const own = netMode === 'client' && netSelfIndex === i + 2;
+          const old = (b.netSouls || []).find(x => x.id === q.id) || (b.netSouls || [])[i];
+          const own = netMode === 'client' && q.id === G.net.selfId;
           return {
-            i: i + 2, color: NET_COLORS[(i + 2) % NET_COLORS.length],
+            i: i + 2, id: q.id, color: NET_COLORS[(i + 2) % NET_COLORS.length],
             x: own && old ? old.x + (q.x - old.x) * 0.2 : q.x,
             y: own && old ? old.y + (q.y - old.y) * 0.2 : q.y,
             invuln: q.invuln, dash: q.dash, dashCd: 0
@@ -508,7 +520,7 @@
       b.h2x = Math.max(A0.x + 12, Math.min(A0.x + A0.w - 12, b.h2x + mv.vx * sp));
       b.h2y = Math.max(A0.y + 12, Math.min(A0.y + A0.h - 12, b.h2y + mv.vy * sp));
     } else if (netSelfIndex >= 2 && b.netSouls) {
-      const s = b.netSouls[netSelfIndex - 2];
+      const s = b.netSouls.find(x => x.id === G.net.selfId) || b.netSouls[netSelfIndex - 2];
       if (s) {
         const sp = (s.dash > 0 ? 430 : 168) * dt * mv.mag;
         s.x = Math.max(A0.x + 12, Math.min(A0.x + A0.w - 12, s.x + mv.vx * sp));
@@ -524,6 +536,7 @@
       flags: Object.assign({}, game.flags), defeated: Object.assign({}, game.defeated),
       spared: Object.assign({}, game.spared),
       questsDone: game.questsDone, startedAt: game.startedAt,
+      godRuns: game.godRuns, godBaseMaxHp: game.godBaseMaxHp,
       player: { x: game.player.x, y: game.player.y }
     };
   }
@@ -547,7 +560,8 @@
         kills: d.kills || 0, spares: d.spares || 0,
         inv: Object.assign({ pie: 0, tea: 0, candy: 0 }, d.inv),
         flags: d.flags || {}, defeated: d.defeated || {}, spared: d.spared || {},
-        questsDone: d.questsDone || 0, startedAt: d.startedAt || Date.now()
+        questsDone: d.questsDone || 0, startedAt: d.startedAt || Date.now(),
+        godRuns: d.godRuns || 0, godBaseMaxHp: d.godBaseMaxHp || 0
       });
       game.hp = Math.max(1, Math.min(game.hp, game.maxHp));
       AU.setTrack(ROOMS[game.roomId].track);
@@ -558,6 +572,7 @@
   }
 
   function bossById(id) { return BOSSES.find(b => b.id === id); }
+  function isSmartBoss(boss) { return !!(boss && boss.smart); }
   function defeatedCount() { return BOSSES.filter(b => game.defeated[b.id]).length; }
 
   function questFoeFor(key, questId) {
@@ -584,6 +599,7 @@
       /* Only re-seat everyone on a REAL room change. Coming back from a
        * battle calls enterRoom(sameRoom) — guests must stay where they stood. */
       if (roomChanged && netMode === 'host' && netPlayers.length > 1) {
+        netInputs = {}; // drop keys held in the previous room
         netPlayers.forEach((q, i) => {
           if (i === 0) return;
           q.x = Math.max(24, Math.min(W - 24, spawn.x + 36 * i));
@@ -1423,6 +1439,22 @@
     return list;
   }
 
+  /* The smart man hits for your whole HP bar, then spares you as usual —
+     so the duel can continue and his 9999 HP can actually be ground down. */
+  function playerHitDamage(b) {
+    if (isSmartBoss(b.boss)) return game.maxHp + 1;
+    return Math.max(1, Math.round(b.boss.atk * (game.spared[b.boss.id] ? 0.5 : 0.85)));
+  }
+  function smartSpare(b) {
+    game.hp = game.maxHp;
+    b.invuln = 1.4;
+    b.flash = 0.8;
+    game.flags.smartLost = true;
+    game.flags.qstart_q1 = true;
+    AU.sfx('spare');
+    showToast('✦ ОН УДАРИЛ ВПОЛНУЮ — И ОПЯТЬ ПОЩАДИЛ. БЕЙ ЕЩЁ.');
+  }
+
   function enemyAttack() {
     const b = game.battle;
     b.turn++;
@@ -1471,7 +1503,7 @@
   function afterAttack() {
     const b = game.battle;
     b.bullets = [];
-    if (b.boss.scriptedLose && b.turn >= 1) { questDefeat(b); return; }
+    if (b.boss.scriptedLose && !isSmartBoss(b.boss) && b.turn >= 1) { questDefeat(b); return; }
     const taunt = b.boss.taunts[(b.turn - 1) % b.boss.taunts.length];
     sayBattle(taunt, () => { b.phase = 'menu'; b.sub = null; b.menuIndex = 0; });
   }
@@ -1522,10 +1554,19 @@
 
   function resolveAttack(b) {
     const acc = 1 - Math.abs(b.barPos - 0.5) * 2;
-    const base = 12 + game.lov * 3 - b.boss.def;
-    let dmg = Math.max(2, Math.round(base * (0.55 + acc * 0.85)));
-    let crit = false;
-    if (acc > 0.94) { dmg += 5; crit = true; }
+    const crit = acc > 0.94;
+    let dmg;
+    if (isSmartBoss(b.boss)) {
+      /* His 9999 HP is a deliberate grind: 1 per normal hit, 2 per perfect. */
+      dmg = crit ? 2 : 1;
+    } else if (game.godRuns > 0) {
+      /* Reward for beating him — three runs of one-hit-everything. */
+      dmg = crit ? 1000000000000000 : 100000000;
+    } else {
+      const base = 12 + game.lov * 3 - b.boss.def;
+      dmg = Math.max(2, Math.round(base * (0.55 + acc * 0.85)));
+      if (crit) dmg += 5;
+    }
     b.enemyHp = Math.max(0, b.enemyHp - dmg);
     b.slash = 0.45;
     b.shake = 9;
@@ -1542,6 +1583,37 @@
     b.phase = 'victory';
     AU.sfx('win');
     AU.setTrack('victory');
+    if (isSmartBoss(b.boss)) {
+      /* Beating him still gives you the list — the story never dead-ends.
+         The reward is a temporary "one hit kills everything" mode. */
+      game.flags.smartLost = true;
+      game.flags.smartMaster = true;
+      game.flags.qstart_q1 = true;
+      if (b.boss.rematch) game.flags.smartRematchDone = true;
+      if (game.godRuns <= 0) game.godBaseMaxHp = game.maxHp;
+      game.godRuns = 3;
+      game.maxHp = 9999; game.hp = 9999;
+      burst(320, 200, '#ffe6a0', 60, 160);
+      const lines = type === 'spare'
+        ? [
+            { who: 'boss', text: 'Ты выдержала. И всё равно пощадила.' },
+            { who: 'sys', text: 'Он ушёл, оставив список из пятидесяти дел.' },
+            { who: 'gal', text: 'Без объяснений. Поняла.' }
+          ]
+        : [
+            { who: 'boss', text: 'Ты сделала 9999 ударов. Я посчитал.' },
+            { who: 'sys', text: 'Он ушёл, оставив список. И три прохождения — с его силой.' },
+            { who: 'gal', text: 'Три. Потом вернётся обычный счёт.' }
+          ];
+      sayBattle(lines, () => {
+        saveGame();
+        game.battle = null;
+        state = 'world';
+        enterRoom(game.roomId, { x: game.player.x, y: Math.min(420, game.player.y + 20) }, true);
+        showToast('✦ СИЛА УМНОГО: 9999 HP · УРОН 10^8 / 10^15 · ОСТАЛОСЬ ' + game.godRuns + ' ПРОХОЖДЕНИЯ');
+      });
+      return;
+    }
     if (b.boss.quest) {
       if (type === 'spare') game.flags['qspare_' + b.boss.id] = true;
       else game.exp += b.boss.exp || 0;
@@ -1590,6 +1662,16 @@
     game.battle = null;
     AU.setTrack('ending');
     if (G.accounts && G.accounts.recordCompletion) G.accounts.recordCompletion(game);
+    let godMsg = '';
+    if (game.godRuns > 0) {
+      game.godRuns--;
+      if (game.godRuns <= 0) {
+        game.maxHp = game.godBaseMaxHp || 30;
+        game.hp = Math.min(game.hp, game.maxHp);
+        game.godRuns = 0; game.godBaseMaxHp = 0;
+        godMsg = '✦ СИЛА УМНОГО ИСЧЕЗЛА. Счёт снова обычный.';
+      } else godMsg = '✦ СИЛА УМНОГО: осталось ' + game.godRuns + ' прохождения.';
+    }
     const s = game.spares;
     let lines;
     if (s === BOSSES.length) {
@@ -1611,7 +1693,9 @@
         { who: 'sys', text: 'КОНЕЦ: ОБЫЧНЫЙ ПУТЬ. Пощажено ' + s + ' из ' + BOSSES.length + '.' }
       ];
     }
+    if (godMsg) lines.push({ who: 'sys', text: godMsg });
     lines.push({ who: 'sys', text: 'Нажми Z, чтобы вернуться в меню.' });
+    try { localStorage.setItem(KEY, JSON.stringify(snapshot())); } catch (e) {}
     say(lines, () => { state = 'title'; titleIndex = 0; AU.setTrack('title'); });
     game.dialogue.speaker = 'sys';
   }
@@ -1767,7 +1851,7 @@
           continue;
         }
         if (b.invuln <= 0 && Math.hypot(p.x - b.hx, p.y - b.hy) < p.r + 7) {
-          const dmg = Math.max(1, Math.round(b.boss.atk * (game.spared[b.boss.id] ? 0.5 : 0.85)));
+          const dmg = playerHitDamage(b);
           game.hp -= dmg;
           b.invuln = 1.0;
           b.shake = 16;
@@ -1775,13 +1859,11 @@
           AU.sfx('hurt');
           burst(b.hx, b.hy, '#ff4d6d', 18);
           if (game.hp <= 0) {
-            game.hp = 0;
-            state = 'gameover';
-            AU.setTrack('title');
-            return;
+            if (isSmartBoss(b.boss)) { smartSpare(b); }
+            else { game.hp = 0; state = 'gameover'; AU.setTrack('title'); return; }
           }
         } else if (netMode === 'host' && netPlayers.length > 1 && b.h2Invuln <= 0 && Math.hypot(p.x - b.h2x, p.y - b.h2y) < p.r + 7) {
-          const dmg2 = Math.max(1, Math.round(b.boss.atk * (game.spared[b.boss.id] ? 0.5 : 0.85)));
+          const dmg2 = playerHitDamage(b);
           game.hp -= dmg2;
           b.h2Invuln = 1.0;
           b.shake = 16;
@@ -1789,24 +1871,20 @@
           AU.sfx('hurt');
           burst(b.h2x, b.h2y, '#c77dff', 18);
           if (game.hp <= 0) {
-            game.hp = 0;
-            state = 'gameover';
-            AU.setTrack('title');
-            return;
+            if (isSmartBoss(b.boss)) { smartSpare(b); }
+            else { game.hp = 0; state = 'gameover'; AU.setTrack('title'); return; }
           }
         } else if (netMode === 'host' && b.netSouls) {
           for (const s of b.netSouls) {
             if (s.invuln <= 0 && Math.hypot(p.x - s.x, p.y - s.y) < p.r + 7) {
-              const dmg3 = Math.max(1, Math.round(b.boss.atk * (game.spared[b.boss.id] ? 0.5 : 0.85)));
+              const dmg3 = playerHitDamage(b);
               game.hp -= dmg3;
               s.invuln = 1.0; b.shake = 16; b.flash = 0.7;
               AU.sfx('hurt');
               burst(s.x, s.y, s.color, 18);
               if (game.hp <= 0) {
-                game.hp = 0;
-                state = 'gameover';
-                AU.setTrack('title');
-                return;
+                if (isSmartBoss(b.boss)) { smartSpare(b); }
+                else { game.hp = 0; state = 'gameover'; AU.setTrack('title'); return; }
               }
               break;
             }
@@ -2350,9 +2428,17 @@
   requestAnimationFrame(loop);
 
   G.net.on('input', d => { netInputs[d.id] = d.data; });
-  G.net.on('state', s => { netSnap = s; });
+  G.net.on('state', s => {
+    if (!s || netMode !== 'client') return;
+    const lob = G.net.lobby && G.net.lobby();
+    if (s.lobby && lob && s.lobby !== lob.code) return;      // old lobby packet
+    if (s.seq && s.seq <= netAppliedSeq) return;             // out-of-order packet
+    if (s.seq) netAppliedSeq = s.seq;
+    netSnap = s;
+  });
   G.net.on('left', () => {
     netMode = ''; netPlayers = []; netInputs = {}; netSnap = null; netLastSnapRef = null;
+    netSnapSeq = 0; netAppliedSeq = 0; netLastRoom = '';
   });
 
   G.debug = {

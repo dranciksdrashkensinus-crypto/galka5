@@ -632,7 +632,7 @@
 
   G.QUEST_FOES = {
     smartFirst: makeQuestFoe({
-      id: 'qf_smart_first', portrait: 'smart-man.png', scriptedLose: true,
+      id: 'qf_smart_first', portrait: 'smart-man.png', smart: true,
       name: 'УМНЫЙ МУЖЧИНА', title: 'ПРОВЕРКА НА ПРОЧНОСТЬ',
       hp: 9999, atk: 4, colors: foeColors.smart,
       patterns: [['rain', 'side'], ['rain', 'side', 'corner']],
@@ -660,9 +660,9 @@
       kill: [L('boss', 'Ты не можешь меня победить.'), L('sys', 'Попытка не засчитана.')]
     }),
     smartRematch: makeQuestFoe({
-      id: 'qf_smart_rematch', portrait: 'smart-man.png', rematch: true,
+      id: 'qf_smart_rematch', portrait: 'smart-man.png', rematch: true, smart: true,
       name: 'УМНЫЙ МУЖЧИНА', title: 'ВСТРЕЧА ВНЕ КВЕСТОВ',
-      hp: 80, atk: 7, colors: foeColors.smart,
+      hp: 9999, atk: 7, colors: foeColors.smart,
       patterns: [['rain', 'homing'], ['homing', 'corner', 'ring']],
       intro: [
         L('sys', 'Он появился сам — без задания, без списка.'),
