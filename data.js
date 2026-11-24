@@ -1401,7 +1401,8 @@
     const sp = G.rooms[m.spyRoom];
     if (sp) sp.npcs.push({ id: 'spy_' + m.boss, x: m.sx, y: m.sy, w: 30, h: 46, name: 'НАБЛЮДАТЕЛЬ', ch2Spy: m.boss });
     const am = G.rooms[m.ambushRoom];
-    if (am) am.npcs.push({ id: 'amb_' + m.boss, x: m.ax, y: m.ay, w: 34, h: 52, name: 'ПЕРЕХВАТ', ch2Ambush: m.boss });
+    /* Director already has his own NPC in the office — no second body on top. */
+    if (am && m.boss !== 'director') am.npcs.push({ id: 'amb_' + m.boss, x: m.ax, y: m.ay, w: 34, h: 52, name: 'ПЕРЕХВАТ', ch2Ambush: m.boss });
   });
 
   G.HELP = 'Движение — WASD/стрелки. Z — говорить и выбирать. X — назад. На телефоне — джойстик и ОК.';
