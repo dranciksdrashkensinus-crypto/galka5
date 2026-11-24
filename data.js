@@ -699,7 +699,7 @@
   });
 
   /* Финальный выбор главы 2: все шесть ровных пацанов на экране сразу.
-     Одна общая полоса HP на 2000, урон ровно 100 за удар, 10 фаз. */
+     Одна общая полоса HP на 1000, урон ровно 50 за удар, 10 фаз. */
   G.CREW_GANG = {
     id: 'crewGang', name: 'ШЕСТЬ РОВНЫХ ПАЦАНОВ', title: 'ВСЕ СРАЗУ · 1000 HP · 10 ФАЗ',
     hp: 1000, atk: 5, def: 2, track: 'path', gang: true,
@@ -708,8 +708,9 @@
       bgTop: '#13251f', bgBottom: '#050b0a'
     },
     gangColors: ['#8affc8', '#8ecbff', '#ffe6a0', '#ff9ec0', '#c8a6ff', '#ffb87a'],
-    /* Six different pictures — not one guy drawn six times. */
-    members: ['loma', 'byba', 'petrunya', 'masha', 'pastuh', 'shesterka'],
+    /* Their own textures: leader, his right hand, his left hand,
+       and the same fourth picture for the remaining three. */
+    members: ['crew-leader', 'crew-right', 'crew-left', 'crew-rest', 'crew-rest', 'crew-rest'],
     intro: [
       L('sys', 'Шесть ровных пацанов встали стеной. Не по очереди. Сразу.'),
       L('crew', 'Ты выбрала драку. Тогда считай.'),

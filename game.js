@@ -91,6 +91,12 @@
     im.src = G.NEWCHARS[id].img;
     G.images[id] = im;
   });
+  /* Six guys in the final fight: leader, right hand, left hand, three more. */
+  ['crew-leader', 'crew-right', 'crew-left', 'crew-rest'].forEach(id => {
+    const im = watchImage(new Image(), id);
+    im.src = id + '.png';
+    G.images[id] = im;
+  });
   /* Quest foes use "qf_*" ids and ".png" portrait strings, while their art is
      already loaded under the short name (govnoed, globus, ...). Map all three
      spellings to the same image so battles show the real portrait. */
