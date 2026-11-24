@@ -793,6 +793,12 @@
     return !!(n && (n.ch2Boss || n.ch2Spy || n.ch2Ambush || n.ch2Boy || n.ch2Finale));
   }
 
+  /* The way back to the ровные пацаны exists only in chapter 2. */
+  function roomExits(id) {
+    const list = (ROOMS[id] && ROOMS[id].exits) || [];
+    return game.chapter === 2 ? list : list.filter(e => !e.ch2);
+  }
+
   /* Chapter 2 markers must not exist at all in chapter 1 — not even as
      invisible NPCs. Add them only when the player is actually in chapter 2. */
   function syncChapterNpcs() {
@@ -869,7 +875,7 @@
     const queue = [[from, null]];
     while (queue.length) {
       const [room, first] = queue.shift();
-      for (const ex of ROOMS[room].exits || []) {
+      for (const ex of roomExits(room)) {
         if (seen[ex.to]) continue;
         const step = first || ex;
         if (ex.to === to) return step;
@@ -1397,7 +1403,7 @@
         }
         /* A guest walking into a door must move EVERYONE, not only the host. */
         let went = false;
-        for (const ex of room.exits) {
+        for (const ex of roomExits(game.roomId)) {
           if (q.x > ex.x && q.x < ex.x + ex.w && q.y > ex.y && q.y < ex.y + ex.h) {
             if (!ex.need || defeatedCount() >= ex.need) {
               AU.sfx('door');
@@ -1421,7 +1427,7 @@
         movePlayer(vx * 132 * dt * mv.mag, vy * 132 * dt * mv.mag);
       } else p.frame = 0;
 
-      for (const ex of room.exits) {
+      for (const ex of roomExits(game.roomId)) {
         if (p.x > ex.x && p.x < ex.x + ex.w && p.y > ex.y && p.y < ex.y + ex.h) {
           if (ex.need && defeatedCount() < ex.need) {
             if (toast.time <= 0) {
@@ -1456,7 +1462,7 @@
     const room = ROOMS[game.roomId];
 
     // exits markers
-    room.exits.forEach(ex => {
+    roomExits(game.roomId).forEach(ex => {
       const cx = ex.x + ex.w / 2, cy = ex.y + ex.h / 2;
       ctx.globalAlpha = 0.35 + 0.12 * Math.sin(T * 3);
       A.px(ctx, cx - 26, cy - 10, 52, 20, '#000');
@@ -3081,7 +3087,7 @@
   G.debug = {
     game, startBattle, bossById, questFoeFor, questBossById, npcTalk, enterRoom, getState: () => state, say, makeBattle, buildSchedule,
     startNewGame: newGame, startChapter2, chapterOptions, ch2Objective, routeExitTo,
-    syncChapterNpcs, activeCh2MarkerNear,
+    syncChapterNpcs, activeCh2MarkerNear, roomExits,
     chapterProgress: () => Object.assign({}, progress),
     unlockChapter2: () => { progress.chapter1Done = true; game.chapter1Done = true; saveProgress(); },
     netSnap: () => netSnap,
