@@ -894,6 +894,13 @@
     const step = routeExitTo(o.room);
     if (step) {
       A.text(ctx, 'ДАЛЬШЕ: ' + step.label, 22, 116, { size: 9, color: '#ffe6a0', align: 'left', shadow: false });
+      if (step.to === 'crew' && game.roomId === 'street') {
+        /* The real exit label sits under the top panels — draw a clear one. */
+        const bob = Math.sin(T * 5) * 2;
+        A.panel(ctx, 12, 178, 154, 42, { fill: 'rgba(8,10,24,.92)', border: '#8affc8' });
+        A.text(ctx, '↖ К ПАЦАНАМ', 89, 199 + bob, { size: 13, color: '#8affc8', align: 'center' });
+        A.text(ctx, 'ВЫХОД СЛЕВА, ВВЕРХУ', 89, 214, { size: 8, color: '#eaffd8', align: 'center', shadow: false });
+      }
     } else {
       A.text(ctx, 'ЦЕЛЬ РЯДОМ — ПОДОЙДИ К МЕТКЕ (ИЛИ НАЖМИ Z)', 22, 116, { size: 9, color: '#8ff5ff', align: 'left', shadow: false });
       const bob = Math.sin(T * 5) * 5;
@@ -1147,11 +1154,22 @@
       say(lines);
       return;
     }
+    /* Chapter 2 has its own missions. Old quests must not let the player
+       replay/finish chapter 1 while inside chapter 2. */
+    if (game.chapter === 2 && (n.questDuel || n.questFoe || n.questItem || n.quest)) {
+      sayCh2([{ who: 'sys', text: 'Сейчас не до старых дел. Только задания старшего пацана.' }]);
+      return;
+    }
     if (game.chapter === 2 && (n.ch2Boss || n.ch2Spy || n.ch2Ambush || n.ch2Boy || n.ch2Finale ||
         (n.boss && (G.CH2_MISSIONS || []).some(x => x.boss === n.boss)))) {
       const missions = G.CH2_MISSIONS || [];
       const m = missions[game.ch2Mission];
+      const ambushNpcId = m && m.boss === 'director' ? 'director' : 'amb_' + (m && m.boss);
       if (n.boss && m && m.boss === n.boss) {
+        if (n.id !== ambushNpcId) {
+          sayCh2([{ who: 'sys', text: 'Не здесь. Старший пацан сказал ждать на маршруте.' }]);
+          return;
+        }
         if (!game.flags['ch2Report_' + m.boss]) {
           sayCh2([{ who: 'sys', text: 'Сначала шпионь и доложи. Потом — разборка.' }]);
           return;
@@ -1161,6 +1179,10 @@
           return;
         }
         sayCh2(m.ambush, () => startBattle(bossById(m.boss), { ch2: true }), m.short);
+        return;
+      }
+      if (n.boss) {
+        sayCh2([{ who: 'sys', text: 'Не сейчас. Сначала сделай дело, которое дал старший пацан.' }]);
         return;
       }
       if (n.ch2Finale) {
