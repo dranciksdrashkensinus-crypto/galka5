@@ -1759,10 +1759,10 @@
     const add = (t, fn) => list.push({ t, fn });
     const cx = A0.x + A0.w / 2, bottom = A0.y + A0.h;
     const p2 = b.phaseIdx >= 1, p3 = b.phaseIdx >= 2;
-    /* All six guys fight together: more bullets per wave AND several
-       different patterns stacked in one turn. Every pattern keeps a gap. */
+    /* All six guys fight together, but this is the EASY version: ordinary
+       wave sizes, two patterns per turn, and a gap in every attack. */
     const dense = !!b.boss.gang;
-    const boost = n => dense ? Math.ceil(n * 1.5) : n;
+    const boost = n => n;
     const pats = b.boss.patterns || [['rain', 'side']];
     const phasePats = pats[Math.min(b.phaseIdx, pats.length - 1)];
     const key = phasePats[(b.turn - 1) % phasePats.length];
@@ -1834,7 +1834,7 @@
     // bullets fan inward. The warning gives time to step out.
     function cornerTrap() {
       for (let wave = 0; wave < boost(p3 ? 3 : 2); wave++) {
-        add(0.4 + wave * (dense ? 0.85 : 1.25), () => {
+        add(0.4 + wave * 1.25, () => {
           const px = b.hx, py = b.hy;
           const left = px < cx, top = py < A0.y + A0.h / 2;
           const ex = left ? A0.x + 8 : A0.x + A0.w - 8;
@@ -1861,7 +1861,7 @@
         { x: A0.x + A0.w + 14, y: A0.y + 40 },
         { x: cx, y: bottom + 14 }
       ];
-      (dense ? [0.45, 1.35, 2.25] : [0.45, 1.7]).forEach((t, wave) => add(t, () => {
+      [0.45, 1.7].forEach((t, wave) => add(t, () => {
         starts.slice(0, boost(p3 ? 3 : 2)).forEach((s, i) => {
           const a = Math.atan2(b.hy - s.y, b.hx - s.x) + (wave ? (i - 1) * 0.25 : 0);
           const speed = p3 ? 100 : 88;
@@ -1889,9 +1889,9 @@
 
     function spiralBurst() {
       for (let w = 0; w < boost(p3 ? 6 : 4); w++) {
-        add(0.4 + w * (dense ? 0.26 : 0.34), () => {
-          for (let k = 0; k < (dense ? 6 : 4); k++) {
-            const a = w * 0.62 + k * (dense ? TAU / 6 : Math.PI / 2);
+        add(0.4 + w * 0.34, () => {
+          for (let k = 0; k < 4; k++) {
+            const a = w * 0.62 + k * Math.PI / 2;
             b.bullets.push(mkBullet(cx, A0.y + 76, Math.cos(a) * 96, Math.sin(a) * 96, {
               r: 5, color: k % 2 ? c.bullet : c.light, shape: 'diamond', spin: 4, life: 2.6
             }));
@@ -1917,7 +1917,7 @@
 
     function sweepRows() {
       for (let w = 0; w < boost(p3 ? 5 : 4); w++) {
-        add(0.35 + w * (dense ? 0.48 : 0.62), () => {
+        add(0.35 + w * 0.62, () => {
           const g = oFollow();
           for (let i = 0; i < cols; i++) {
             if (i === g) continue;
@@ -1935,9 +1935,7 @@
     function laserLanes() {
       const g = playerGap();
       /* The heart's own column stays open; only neighbours are aimed at. */
-      (dense
-        ? [Math.max(0, g - 2), Math.max(0, g - 1), Math.min(cols - 1, g + 1), Math.min(cols - 1, g + 2)]
-        : [Math.max(0, g - 1), Math.min(cols - 1, g + 1)]).forEach(i => {
+      [Math.max(0, g - 1), Math.min(cols - 1, g + 1)].forEach(i => {
         const x = colX(i);
         b.warns.push({ x: x - 15, y: A0.y, w: 30, h: A0.h, life: 0.95, max: 0.95, color: '#ff5d7d' });
         AU.sfx('warn');
@@ -1952,7 +1950,7 @@
     }
 
     function bounceShots() {
-      (dense ? [0.45, 1.3, 2.15] : [0.45, 1.7]).forEach((t, wave) => add(t, () => {
+      [0.45, 1.7].forEach((t, wave) => add(t, () => {
         [-1, 1].forEach(s => b.bullets.push(mkBullet(
           s < 0 ? A0.x + 18 : A0.x + A0.w - 18, A0.y + 36 + wave * 46,
           s * 145, 74, {
@@ -1979,7 +1977,7 @@
     function rockFall() {
       const waves = boost(p3 ? 6 : 5);
       for (let w = 0; w < waves; w++) {
-        add(0.4 + w * (dense ? 0.62 : 0.8), () => {
+        add(0.4 + w * 0.8, () => {
           for (let i = 0; i < boost(3); i++) {
             const x = A0.x + 55 + i * (A0.w - 110) / 2 + (Math.random() - 0.5) * 16;
             b.bullets.push(mkBullet(x, A0.y - 14, 0, 55, {
@@ -1995,9 +1993,9 @@
       /* Big square fists fall everywhere except a clearly marked safe lane. */
       const waves = boost(3);
       for (let w = 0; w < waves; w++) {
-        add(0.5 + w * (dense ? 0.68 : 0.9), () => {
+        add(0.5 + w * 0.9, () => {
           const g = playerGap();
-          const safe = dense ? 2 : 1;
+          const safe = 1;
           b.warns.push({
             x: colX(g) - step * (safe + 0.5), y: A0.y,
             w: step * (safe * 2 + 1), h: A0.h,
@@ -2006,7 +2004,7 @@
           for (let i = 0; i < cols; i++) {
             if (Math.abs(i - g) <= safe) continue;
             b.bullets.push(mkBullet(colX(i), A0.y - 16, 0, 145, {
-              r: dense ? 14 : 12, color: '#ffd08a', shape: 'square', spin: 0.7, life: 3
+              r: 12, color: '#ffd08a', shape: 'square', spin: 0.7, life: 3
             }));
           }
         });
@@ -2016,13 +2014,13 @@
     function waveSweep() {
       const waves = boost(2), lanes = boost(5);
       for (let w = 0; w < waves; w++) {
-        add(0.45 + w * (dense ? 0.8 : 1.15), () => {
+        add(0.45 + w * 1.15, () => {
           const dir = w % 2 ? 1 : -1;
           for (let i = 0; i < lanes; i++) {
             const y = A0.y + 26 + i * (A0.h - 52) / (lanes - 1);
             b.bullets.push(mkBullet(dir > 0 ? A0.x - 16 : A0.x + A0.w + 16, y, dir * 132, 0, {
               r: 6, color: c.light, shape: 'diamond', spin: 2.5, life: 3.2,
-              kind: 'sine', baseY: y, amp: dense ? 22 : 14, f: 2.4
+              kind: 'sine', baseY: y, amp: 14, f: 2.4
             }));
           }
         });
@@ -2050,9 +2048,9 @@
     }
 
     function drillSpiral() {
-      const arms = dense ? 6 : 4, waves = boost(6);
+      const arms = 4, waves = boost(6);
       for (let w = 0; w < waves; w++) {
-        add(0.3 + w * (dense ? 0.24 : 0.34), () => {
+        add(0.3 + w * 0.34, () => {
           for (let k = 0; k < arms; k++) {
             const a = w * 0.52 + k * TAU / arms;
             b.bullets.push(mkBullet(cx, A0.y + 76, Math.cos(a) * 102, Math.sin(a) * 102, {
@@ -2065,16 +2063,15 @@
 
     function emit(k) {
       switch (k) {
-        case 'rain': rainRows(boost(p3 ? 6 : 4), { follow: p2, double: p3 || dense, step: dense ? 0.42 : 0.6, speed: p2 ? 140 : 115, color: c.bullet }); break;
+        case 'rain': rainRows(boost(p3 ? 6 : 4), { follow: p2, double: p3, step: 0.6, speed: p2 ? 140 : 115, color: c.bullet }); break;
         case 'feathers': rainRows(boost(p3 ? 6 : 4), { follow: p2, spread: p2 ? 18 : 12, speed: 128, r: 6, shape: 'diamond', color: '#ffe6a0', spin: 3 }); break;
-        case 'stamps': rainRows(boost(p3 ? 7 : 5), { follow: p2, double: p3 || dense, speed: p2 ? 165 : 140, r: 8, shape: 'square', color: '#ff6d8f', spin: 2.4 }); break;
-        case 'beats': rainRows(boost(p3 ? 8 : 6), { follow: true, double: p3 || dense, start: 0.3, step: dense ? 0.34 : 0.46, speed: p2 ? 220 : 185, r: 5, color: '#ff8f6a', life: 2.8 }); break;
+        case 'stamps': rainRows(boost(p3 ? 7 : 5), { follow: p2, double: p3, speed: p2 ? 165 : 140, r: 8, shape: 'square', color: '#ff6d8f', spin: 2.4 }); break;
+        case 'beats': rainRows(boost(p3 ? 8 : 6), { follow: true, double: p3, start: 0.3, step: 0.46, speed: p2 ? 220 : 185, r: 5, color: '#ff8f6a', life: 2.8 }); break;
         case 'rocks': rockFall(); break;
         case 'side':
           side(0.9, { left: true, speed: p2 ? 190 : 150, r: 6, color: c.bullet });
           side(1.9, { left: false, speed: p2 ? 200 : 160, r: 6, color: c.light });
-          if (p2 || dense) side(2.8, { left: true, speed: 210, r: 5, color: c.bullet });
-          if (dense) side(3.6, { left: false, speed: 225, r: 5, color: '#ffd08a' });
+          if (p2) side(2.8, { left: true, speed: 210, r: 5, color: c.bullet });
           break;
         case 'pincer': pincer(); break;
         case 'corner': cornerTrap(); break;
@@ -2095,10 +2092,9 @@
     }
     emit(key);
     if (dense) {
-      /* Six attackers = three different patterns at once, every turn. */
+      /* Easy mode: only TWO patterns per turn, instead of three. */
       const extras = phasePats.filter(k => k !== key);
-      emit(extras.length ? extras[(b.turn - 1) % extras.length] : key);
-      emit(extras.length > 1 ? extras[b.turn % extras.length] : key);
+      if (extras.length) emit(extras[(b.turn - 1) % extras.length]);
       b.attackName = 'ШЕСТЕРО · ' + b.attackName;
     }
 
@@ -2232,7 +2228,7 @@
     const crit = acc > 0.94;
     let dmg;
     if (b.boss.gang) {
-      /* Six guys share 2000 HP: exactly 50 per hit, 40 hits total. */
+      /* Easy mode: 1000 HP shared, exactly 50 per hit, 20 hits total. */
       dmg = 50;
     } else if (isSmartBoss(b.boss)) {
       /* 9999 HP remains. Small hits only — and no reward, no huge damage. */
@@ -2412,11 +2408,14 @@
     /* Chapter 2 gets its OWN leaderboard entry, separate from chapter 1. */
     if (G.accounts && G.accounts.recordChapter2) G.accounts.recordChapter2(game);
     if (choice.id === 'fight' && CREW_GANG) {
-      /* Choosing to fight goes STRAIGHT into the six-guy battle. */
+      /* Our guys give Галька five teas right before the fight. */
+      game.inv.tea = (game.inv.tea || 0) + 5;
+      saveGame();
+      showToast('✦ ПАЦАНЫ ДАЛИ ТЕБЕ 5 ЧАЕВ. ПЕРЕД ДРАКОЙ.');
       sayCh2([
-        { who: 'crew', text: 'Тогда пошли. Все шесть. Сразу.' },
-        { who: 'gal', text: 'Без объяснений. Пятьдесят за удар.' },
-        { who: 'sys', text: '✦ БОЙ: 2000 HP · 10 ФАЗ · ПО 3 АТАКИ ЗА ХОД · УРОН 50' }
+        { who: 'crew', text: 'На. Пять чаев. Перед дракой — как надо.' },
+        { who: 'gal', text: 'Пять. Ладно. Без объяснений.' },
+        { who: 'sys', text: '✦ +5 ЧАЕВ · БОЙ: 1000 HP · 10 ФАЗ · ПО 2 АТАКИ ЗА ХОД · УРОН 50' }
       ], () => startBattle(CREW_GANG), 'СТАРШИЙ ПАЦАН');
       return;
     }
