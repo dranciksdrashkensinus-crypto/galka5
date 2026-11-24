@@ -3,6 +3,7 @@
   'use strict';
 
   const A = G.art, AU = G.audio, BOSSES = G.bosses, ROOMS = G.rooms;
+  const CREW_GANG = G.CREW_GANG;
   const W = 640, H = 480;
   const KEY = 'galka_underground_save_v1';
   const PROGRESS_KEY = 'galka_chapter_progress_v1';
@@ -817,7 +818,7 @@
     } catch (e) { return false; }
   }
 
-  function bossById(id) { return BOSSES.find(b => b.id === id); }
+  function bossById(id) { return BOSSES.find(b => b.id === id) || (CREW_GANG && CREW_GANG.id === id ? CREW_GANG : null); }
   function isSmartBoss(boss) { return !!(boss && boss.smart); }
   function defeatedCount() {
     if (game.chapter === 2) return BOSSES.length; // chapter 2 opens all old routes
@@ -1741,7 +1742,7 @@
     resetNetSouls(game.battle);
     game.dialogue = null;
     state = 'battle';
-    AU.setTrack(boss.quest ? 'path' : (boss.id === 'huyet' ? 'huyet' : boss.id));
+    AU.setTrack(boss.track || (boss.quest ? 'path' : (boss.id === 'huyet' ? 'huyet' : boss.id)));
     AU.sfx('select');
   }
 
@@ -2134,7 +2135,10 @@
     const acc = 1 - Math.abs(b.barPos - 0.5) * 2;
     const crit = acc > 0.94;
     let dmg;
-    if (isSmartBoss(b.boss)) {
+    if (b.boss.gang) {
+      /* Six guys share 2000 HP: exactly 100 per hit, 20 hits total. */
+      dmg = 100;
+    } else if (isSmartBoss(b.boss)) {
       /* 9999 HP remains. Small hits only — and no reward, no huge damage. */
       dmg = crit ? 2 : 1;
     } else {
@@ -2158,6 +2162,19 @@
     b.phase = 'victory';
     AU.sfx('win');
     AU.setTrack('victory');
+    if (b.boss.gang) {
+      /* Final fight of chapter 2: no chapter-1 rewards, no endings. */
+      game.flags.crewBattleDone = true;
+      game.hp = Math.min(game.maxHp, game.hp + 20);
+      saveGame();
+      sayBattle(b.boss[type] || b.boss.kill, () => {
+        game.battle = null;
+        state = 'title';
+        titleIndex = 0;
+        AU.setTrack('title');
+      });
+      return;
+    }
     if (b.boss.ch2) {
       const missions = G.CH2_MISSIONS || [];
       const idx = missions.findIndex(m => m.boss === b.boss.id);
@@ -2294,6 +2311,15 @@
     progress.ch2Done = true;
     saveProgress();
     saveGame();
+    if (choice.id === 'fight' && CREW_GANG) {
+      /* Choosing to fight goes STRAIGHT into the six-guy battle. */
+      sayCh2([
+        { who: 'crew', text: 'Тогда пошли. Все шесть. Сразу.' },
+        { who: 'gal', text: 'Без объяснений. Один удар — сто.' },
+        { who: 'sys', text: '✦ БОЙ: 2000 HP · 10 ФАЗ · УРОН 100 ЗА УДАР' }
+      ], () => startBattle(CREW_GANG), 'СТАРШИЙ ПАЦАН');
+      return;
+    }
     sayCh2(choice.after.slice(), () => {
       state = 'title';
       titleIndex = 0;
@@ -2592,16 +2618,33 @@
     // enemy sprite — the director's son is deliberately tiny
     const pulse = b.phase2 ? 1 + Math.sin(T * 6) * 0.03 : 1;
     const tiny = b.boss.id === 'director' ? 0.72 : 1;
-    ctx.save();
-    ctx.translate(320, 196); ctx.scale(pulse * tiny, pulse * tiny); ctx.translate(-320, -196);
-    A.drawChar(ctx, bossImage(b.boss), 320, 288, Math.floor(T * 3) % 3, {
-      width: 112, height: 132, legH: 20,
-      legColor: b.boss.colors.dark, bootColor: '#111322',
-      tint: b.slash > 0 ? '#ffffff' : null, tintAlpha: 0.55,
-      outline: b.boss.colors.main,
-      fallback: b.boss.id
-    });
-    ctx.restore();
+    if (b.boss.gang) {
+      /* All six ровные пацаны are on screen at the same time. */
+      const xs = [185, 239, 293, 347, 401, 455];
+      xs.forEach((x, i) => {
+        ctx.save();
+        ctx.translate(x, 196); ctx.scale(pulse * 0.55, pulse * 0.55); ctx.translate(-x, -196);
+        A.drawChar(ctx, bossImage(b.boss), x, 288 + (i % 2) * 6, Math.floor(T * 3) % 3, {
+          width: 112, height: 132, legH: 20,
+          legColor: '#1c2b26', bootColor: '#0a1010',
+          tint: b.slash > 0 ? '#ffffff' : null, tintAlpha: 0.55,
+          outline: (b.boss.gangColors || [])[i] || b.boss.colors.main,
+          fallback: 'crew' + (i + 1)
+        });
+        ctx.restore();
+      });
+    } else {
+      ctx.save();
+      ctx.translate(320, 196); ctx.scale(pulse * tiny, pulse * tiny); ctx.translate(-320, -196);
+      A.drawChar(ctx, bossImage(b.boss), 320, 288, Math.floor(T * 3) % 3, {
+        width: 112, height: 132, legH: 20,
+        legColor: b.boss.colors.dark, bootColor: '#111322',
+        tint: b.slash > 0 ? '#ffffff' : null, tintAlpha: 0.55,
+        outline: b.boss.colors.main,
+        fallback: b.boss.id
+      });
+      ctx.restore();
+    }
 
     if (b.boss.id === 'abayunda') {
       // stacked chins in front of the sprite
@@ -2634,7 +2677,7 @@
     A.text(ctx, b.boss.title, 158, 60, { size: 10, color: '#b8c0e0' });
     A.px(ctx, 158, 70, 210, 11, '#1b1d33');
     A.px(ctx, 160, 72, 206 * Math.max(0, b.enemyHp / b.enemyMax), 7, b.spareReady ? '#8affc8' : b.boss.colors.main);
-    A.text(ctx, 'HP ' + b.enemyHp + ' / ' + b.enemyMax, 158, 94, { size: 11, color: '#e8ecff' });
+    A.text(ctx, 'HP ' + b.enemyHp + ' / ' + b.enemyMax + (b.boss.gang ? '  ×6' : ''), 158, 94, { size: 11, color: '#e8ecff' });
     A.text(ctx, 'АТК ' + b.boss.atk + '   ЗАЩ ' + b.boss.def, 158, 110, { size: 11, color: '#9fa8d8' });
     // phase pips + spare progress
     (b.boss.phases || []).forEach((ph, i) => {
@@ -3171,7 +3214,7 @@
   });
 
   G.debug = {
-    game, startBattle, bossById, questFoeFor, questBossById, npcTalk, enterRoom, getState: () => state, say, makeBattle, buildSchedule,
+    game, startBattle, bossById, crewGang: () => CREW_GANG, questFoeFor, questBossById, npcTalk, enterRoom, getState: () => state, say, makeBattle, buildSchedule,
     startNewGame: newGame, startChapter2, chapterOptions, ch2Objective, routeExitTo,
     syncChapterNpcs, activeCh2MarkerNear, roomExits,
     chapterProgress: () => Object.assign({}, progress),
