@@ -169,6 +169,18 @@
     if (e.pointerType === 'touch') setInputMode(true);
   }, true);
   document.getElementById('muteBtn').addEventListener('click', toggleMute);
+  document.getElementById('newGameBtn').addEventListener('click', () => {
+    AU.ensure();
+    newGame();
+    state = 'world';
+    say([{ who: 'sys', text: 'Галька проснулась. Восьмой год в школе. Шестой — с классом 6 «И». Сегодня опять кричать.' },
+         { who: 'gal', text: 'Чай. Потом школа. Без объяснений.' }]);
+  });
+  document.getElementById('chapterBtn').addEventListener('click', () => {
+    AU.ensure();
+    state = 'chapterSelect';
+    chapterIndex = 0;
+  });
 
   const touchRoot = document.getElementById('touch');
   let activePointers = 0;
@@ -312,6 +324,8 @@
   let state = 'title';
   let T = 0;
   let titleIndex = 0;
+  let ch2ChoiceIndex = 0;
+  let chapterIndex = 0;
   let liveTick = 0;
   let toast = { text: '', time: 0 };
 
@@ -361,7 +375,8 @@
     player: { x: 320, y: 410, dir: 'down', frame: 0, walkT: 0 },
     dialogue: null, battle: null, particles: [], fade: null,
     messageTime: 0, message: '',
-    questsDone: 0, startedAt: 0
+    questsDone: 0, startedAt: 0,
+    chapter: 1, chapter1Done: false, ch2Done: false, ch2Choice: '', ch2Mission: 0
   };
 
   function newGame() {
@@ -371,10 +386,67 @@
     game.inv = { pie: 2, tea: 1, candy: 3 };
     game.flags = {}; game.defeated = {}; game.spared = {};
     game.questsDone = 0; game.startedAt = Date.now();
+    game.chapter = 1; game.ch2Done = false; game.ch2Choice = ''; game.ch2Mission = 0;
     game.player = { x: 320, y: 410, dir: 'down', frame: 0, walkT: 0 };
     game.dialogue = null; game.battle = null; game.particles = []; game.fade = null;
     AU.setTrack('home');
     enterRoom('home', ROOMS.home.spawn, true);
+  }
+
+  /* Chapter 2 reuses the old bosses, but they are faster, tougher and angrier. */
+  function chapter2Boss(src) {
+    const L = (who, text) => ({ who, text });
+    const hp = Math.round(src.hp * 1.7);
+    const patterns = (src.patterns || []).map((p, i) =>
+      i === 0 ? p.slice() : p.concat(p.indexOf('corner') < 0 ? ['corner'] : []));
+    return Object.assign({}, src, {
+      hp, enemyMax: hp, atk: src.atk + 4, def: src.def + 2,
+      ch2: true, final: false,
+      title: 'ГЛАВА 2 · ' + src.title,
+      patterns,
+      phases: (src.phases || []).map(ph => Object.assign({}, ph)),
+      taunts: [
+        [L('boss', 'В первой главе я была добрее.')],
+        [L('boss', 'Ты пришилась к пацанам — теперь держи удар.')]
+      ].concat(src.taunts || []),
+      intro: [
+        L('sys', 'ГЛАВА 2. ПЕРЕХВАТ.'),
+        L('boss', src.name + '. Ты опять здесь.'),
+        L('gal', 'Пришилась. Без объяснений.')
+      ],
+      kill: [
+        L('boss', 'Ты сильнее, чем в первый раз. Но я больше не играю.'),
+        L('sys', '✦ Перехват выполнен. Иди к старшему пацану.')
+      ],
+      spare: [
+        L('boss', 'Ладно. Не бей. Я запомню.'),
+        L('sys', '✦ Перехват выполнен без убийства. Иди к старшему пацану.')
+      ]
+    });
+  }
+
+  function startChapter2() {
+    game.chapter = 2;
+    game.hp = 42; game.maxHp = 42; game.lov = 2; game.exp = 0;
+    game.kills = 0; game.spares = 0;
+    game.inv = { pie: 3, tea: 2, candy: 4 };
+    game.flags = {}; game.defeated = {}; game.spared = {};
+    game.questsDone = 0; game.startedAt = Date.now();
+    game.ch2Done = false; game.ch2Choice = ''; game.ch2Mission = 0;
+    game.player = { x: 90, y: 390, dir: 'right', frame: 0, walkT: 0 };
+    game.dialogue = null; game.battle = null; game.particles = []; game.fade = null;
+    enterRoom('crew', { x: 90, y: 390 }, true);
+    state = 'world';
+    AU.setTrack('path');
+    say([
+      { who: 'sys', text: 'КАТСЦЕНА. Сын директора захлопнул дверь перед тобой.' },
+      { who: 'boss', text: 'Галька, ты побила меня. Вон из школы. И не возвращайся.' },
+      { who: 'gal', text: 'Я не извиняюсь. Я ухожу.' },
+      { who: 'sys', text: 'Ты пошла к ровным пацанам. Не потому что они правы — потому что не хочешь быть чушпанкой.' },
+      { who: 'crew', text: 'Галька? Пришилась — значит, наша. Есть дело.' },
+      { who: 'gal', text: 'Без объяснений. Что делать?' }
+    ]);
+    saveGame();
   }
 
   G.startNetworkGame = function (role, startData) {
@@ -614,6 +686,8 @@
       flags: Object.assign({}, game.flags), defeated: Object.assign({}, game.defeated),
       spared: Object.assign({}, game.spared),
       questsDone: game.questsDone, startedAt: game.startedAt,
+      chapter: game.chapter, chapter1Done: game.chapter1Done,
+      ch2Done: game.ch2Done, ch2Choice: game.ch2Choice, ch2Mission: game.ch2Mission,
       player: { x: game.player.x, y: game.player.y }
     };
   }
@@ -637,8 +711,11 @@
         kills: d.kills || 0, spares: d.spares || 0,
         inv: Object.assign({ pie: 0, tea: 0, candy: 0 }, d.inv),
         flags: d.flags || {}, defeated: d.defeated || {}, spared: d.spared || {},
-        questsDone: d.questsDone || 0, startedAt: d.startedAt || Date.now()
+        questsDone: d.questsDone || 0, startedAt: d.startedAt || Date.now(),
+        chapter: d.chapter || 1, chapter1Done: !!d.chapter1Done,
+        ch2Done: !!d.ch2Done, ch2Choice: d.ch2Choice || '', ch2Mission: d.ch2Mission || 0
       });
+      if (!game.chapter1Done && (game.defeated.director || game.spared.director)) game.chapter1Done = true;
       /* Old saves still carry the removed "smart man" reward. Wipe it on load. */
       const normalMax = 30 + 5 * BOSSES.filter(b => game.defeated[b.id]).length;
       if ((d.godRuns || 0) > 0 || game.maxHp > normalMax) {
@@ -655,7 +732,10 @@
 
   function bossById(id) { return BOSSES.find(b => b.id === id); }
   function isSmartBoss(boss) { return !!(boss && boss.smart); }
-  function defeatedCount() { return BOSSES.filter(b => game.defeated[b.id]).length; }
+  function defeatedCount() {
+    if (game.chapter === 2) return BOSSES.length; // chapter 2 opens all old routes
+    return BOSSES.filter(b => game.defeated[b.id]).length;
+  }
 
   function questFoeFor(key, questId) {
     const src = (G.QUEST_FOES || {})[key];
@@ -895,6 +975,108 @@
       ];
       say(lines);
       return;
+    }
+    if (game.chapter === 2 && (n.ch2Boss || n.ch2Spy || n.ch2Ambush || n.ch2Boy || n.ch2Finale)) {
+      const missions = G.CH2_MISSIONS || [];
+      const m = missions[game.ch2Mission];
+      if (n.ch2Finale) {
+        if (game.ch2Mission < missions.length) {
+          say([
+            { who: 'crew', text: 'Не сейчас. Сначала все перехваты.' },
+            { who: 'sys', text: 'Осталось: ' + (missions.length - game.ch2Mission) + '.' }
+          ]);
+          return;
+        }
+        showChapter2Finale();
+        return;
+      }
+      if (n.ch2Boy) {
+        say([
+          { who: 'crew', text: 'Мы не доминируем. Мы просто пришились и держимся вместе.' },
+          { who: 'gal', text: 'Я поняла. Без объяснений.' }
+        ]);
+        game.dialogue.img = G.images.abayunda;
+        return;
+      }
+      if (n.ch2Boss) {
+        if (!m) {
+          say([
+            { who: 'crew', text: 'Все перехваты сделаны. Сын директора НЕ БУДЕТ ПОМНИТЬ ЭТОТ ДЕНЬ.' },
+            { who: 'gal', text: 'Поняла. Забор ждёт.' }
+          ]);
+          return;
+        }
+        if (!game.flags['ch2Spy_' + m.boss]) {
+          game.flags['ch2Active_' + m.boss] = true;
+          say(m.intro);
+          showToast('ГЛАВА 2 · ДЕЛО: ' + m.short);
+          return;
+        }
+        if (!game.flags['ch2Report_' + m.boss]) {
+          game.flags['ch2Report_' + m.boss] = true;
+          say(m.report);
+          showToast('✦ ПЕРЕХВАТ ОТКРЫТ: ' + m.short);
+          return;
+        }
+        if (!game.flags['ch2Done_' + m.boss]) {
+          say([
+            { who: 'crew', text: 'Ты уже доложила. Иди на перехват — ' + m.short + ' на маршруте.' },
+            { who: 'gal', text: 'Иду.' }
+          ]);
+          return;
+        }
+        saveGame();
+        const next = missions[game.ch2Mission];
+        if (!next) {
+          say([
+            { who: 'crew', text: 'Дело закрыто. Вечером разборка с пацанами из другого района.' },
+            { who: 'sys', text: 'Иди к забору. Там ждёт выбор.' }
+          ]);
+          showToast('✦ ВСЕ ПЕРЕХВАТЫ ВЫПОЛНЕНЫ. ФИНАЛ ГЛАВЫ 2 ОТКРЫТ.');
+        } else {
+          say([
+            { who: 'crew', text: 'Принято. Следующее дело — ' + next.short + '.' },
+            { who: 'gal', text: 'Без объяснений.' }
+          ]);
+          showToast('ГЛАВА 2 · ДЕЛО: ' + next.short);
+        }
+        return;
+      }
+      if (n.ch2Spy) {
+        if (!m || m.boss !== n.ch2Spy) {
+          say([{ who: 'sys', text: 'Сейчас не это дело. Спроси у старшего пацана.' }]);
+          return;
+        }
+        if (!game.flags['ch2Active_' + m.boss]) {
+          say([{ who: 'sys', text: 'Сначала возьми задание у старшего пацана.' }]);
+          return;
+        }
+        if (game.flags['ch2Spy_' + m.boss]) {
+          say([{ who: 'sys', text: 'Информация уже записана. Доложи старшему.' }]);
+          return;
+        }
+        game.flags['ch2Spy_' + m.boss] = true;
+        say(m.spy);
+        showToast('✦ ИНФОРМАЦИЯ ПОЛУЧЕНА. ДОЛОЖИ СТАРШЕМУ ПАЦАНУ.');
+        AU.sfx('save');
+        return;
+      }
+      if (n.ch2Ambush) {
+        if (!m || m.boss !== n.ch2Ambush) {
+          say([{ who: 'sys', text: 'Этот перехват пока не нужен.' }]);
+          return;
+        }
+        if (!game.flags['ch2Report_' + m.boss]) {
+          say([{ who: 'sys', text: 'Сначала посмотри и доложи. Перехват не просто так.' }]);
+          return;
+        }
+        if (game.flags['ch2Done_' + m.boss]) {
+          say([{ who: 'sys', text: 'Здесь уже разобрались.' }]);
+          return;
+        }
+        say(m.ambush, () => startBattle(bossById(m.boss), { ch2: true }));
+        return;
+      }
     }
     if (n.warp) {
       const w = n.warp;
@@ -1252,14 +1434,15 @@
     feathers: 'ПЕРЬЯ', stamps: 'ШТАМПЫ', rocks: 'КАМНИ', beats: 'БИТ'
   };
 
-  function makeBattle(boss) {
-    const arena = boss.id === 'huyet'
+  function makeBattle(boss, opts) {
+    const b0 = opts && opts.ch2 ? chapter2Boss(boss) : boss;
+    const arena = b0.id === 'huyet'
       ? { x: 150, y: 108, w: 340, h: 184 }
-      : boss.id === 'afina'
+      : b0.id === 'afina'
         ? { x: 160, y: 106, w: 320, h: 186 }
         : { x: 172, y: 110, w: 296, h: 182 };
     return {
-      boss, arena, enemyHp: boss.hp, enemyMax: boss.hp,
+      boss: b0, arena, enemyHp: b0.hp, enemyMax: b0.hp,
       phase: 'entrance', timer: 0, turn: 0, duration: 4.6,
       bullets: [], warns: [], schedule: [], spawnI: 0,
       hx: arena.x + arena.w / 2, hy: arena.y + arena.h - 32,
@@ -1277,8 +1460,8 @@
     };
   }
 
-  function startBattle(boss) {
-    game.battle = makeBattle(boss);
+  function startBattle(boss, opts) {
+    game.battle = makeBattle(boss, opts);
     resetNetSouls(game.battle);
     game.dialogue = null;
     state = 'battle';
@@ -1699,6 +1882,31 @@
     b.phase = 'victory';
     AU.sfx('win');
     AU.setTrack('victory');
+    if (b.boss.ch2) {
+      const missions = G.CH2_MISSIONS || [];
+      const idx = missions.findIndex(m => m.boss === b.boss.id);
+      game.flags['ch2Done_' + b.boss.id] = true;
+      game.ch2Mission = Math.max(game.ch2Mission, idx + 1);
+      if (type === 'spare') { game.spares++; game.spared[b.boss.id] = true; }
+      else { game.kills++; game.exp += b.boss.exp || 0; game.lov++; }
+      game.maxHp += 5;
+      game.hp = Math.min(game.maxHp, game.hp + 14);
+      const skinJustUnlocked = type === 'kill' ? unlockSkinForBoss(b.boss.id) : null;
+      burst(320, 200, type === 'spare' ? '#8affc8' : b.boss.colors.main, 60, 160);
+      sayBattle(b.boss[type], () => {
+        saveGame();
+        game.battle = null;
+        state = 'world';
+        enterRoom('crew', { x: 320, y: 390 });
+        if (game.ch2Mission >= missions.length) {
+          showToast('✦ ВСЕ ПЕРЕХВАТЫ ГЛАВЫ 2 ВЫПОЛНЕНЫ. ИДИ К ЗАБОРУ.');
+        } else {
+          showToast((skinJustUnlocked ? '✦ СКИН ОТКРЫТ: ' + skinJustUnlocked + ' · ' : '') +
+            '✦ ДЕЛО ЗАКРЫТО. СЛЕДУЮЩЕЕ У СТАРШЕГО ПАЦАНА.');
+        }
+      });
+      return;
+    }
     if (isSmartBoss(b.boss)) {
       /* No 9999-HP reward and no super damage any more. The list is the only
          thing he leaves behind; normally he simply kills Галька instead. */
@@ -1777,9 +1985,32 @@
     });
   }
 
+  function showChapter2Finale() {
+    AU.setTrack('ending');
+    say((G.CH2_FINALE || []).slice(), () => {
+      state = 'ch2Choice';
+      ch2ChoiceIndex = 0;
+      AU.sfx('select');
+    });
+  }
+
+  function finishChapter2Choice() {
+    const choice = (G.CH2_CHOICE || {}).options[ch2ChoiceIndex];
+    if (!choice) return;
+    game.ch2Choice = choice.id;
+    game.ch2Done = true;
+    saveGame();
+    say(choice.after.slice(), () => {
+      state = 'title';
+      titleIndex = 0;
+      AU.setTrack('title');
+    });
+  }
+
   function showEnding() {
     state = 'ending';
     game.battle = null;
+    game.chapter1Done = true;
     AU.setTrack('ending');
     if (G.accounts && G.accounts.recordCompletion) G.accounts.recordCompletion(game);
     const s = game.spares;
@@ -2303,8 +2534,34 @@
 
   /* ---------------- title / gameover / ending ---------------- */
 
+  function chapterOptions() {
+    return [
+      { label: 'ГЛАВА 1 · ПОДЗЕМНЫЙ РИТМ', open: true },
+      { label: 'ГЛАВА 2 · ПРИШИТЫЕ ПАЦАНЫ' + (game.chapter1Done ? '' : ' · Закрыта'), open: !!game.chapter1Done },
+      { label: 'ГЛАВА 3 · ' +
+          (game.ch2Choice === 'fight' ? 'ДРАКА · в разработке' :
+           game.ch2Choice === 'run' ? 'ПРЕДАТЕЛЬСТВО · в разработке' : 'в разработке'), open: false }
+    ];
+  }
+
+  function drawChapterSelect() {
+    A.drawBattleBG(ctx, BOSSES[BOSSES.length - 1], T * 0.25);
+    A.px(ctx, 70, 70, 500, 340, 'rgba(8,8,20,0.9)');
+    A.text(ctx, 'ВЫБОР ГЛАВЫ', 320, 112, { size: 30, color: '#ffe6a0', align: 'center' });
+    chapterOptions().forEach((o, i) => {
+      const sel = i === chapterIndex;
+      A.text(ctx, (sel ? '▶ ' : '   ') + o.label, 320, 212 + i * 60, {
+        size: 16, color: !o.open ? '#6d7398' : sel ? '#ffe6a0' : '#c8cff0', align: 'center'
+      });
+      if (!o.open) A.text(ctx, 'ЗАКРЫТА', 320, 232 + i * 60, { size: 9, color: '#ff9ec0', align: 'center', shadow: false });
+    });
+    A.text(ctx, 'Первая глава открывает вторую. Выбор в конце второй влияет на третью.', 320, 370, {
+      size: 10, color: '#8affc8', align: 'center', shadow: false
+    });
+  }
+
   function titleOptions() {
-    const opts = ['НОВАЯ ИГРА'];
+    const opts = ['НОВАЯ ИГРА', 'ВЫБОР ГЛАВЫ'];
     if (hasSave()) opts.push('ПРОДОЛЖИТЬ');
     const locked = lockedSkinNames();
     opts.push('СКИН: ' + G.heroSkin() + (locked.length ? ' · ЗАКР: ' + locked.join(',') : ''));
@@ -2366,6 +2623,21 @@
     A.text(ctx, 'ТЫ ОЧНУЛАСЬ...', 320, 200, { size: 38, color: '#ff8fb8', align: 'center' });
     A.text(ctx, 'Галька открыла глаза. В кармане — холодный осколок. Пора обратно.', 320, 246, { size: 13, color: '#b8c0e0', align: 'center' });
     if (Math.floor(T * 2) % 2 === 0) A.text(ctx, 'Нажми Z, чтобы подняться', 320, 310, { size: 15, color: '#fff', align: 'center' });
+  }
+
+  function drawCh2Choice() {
+    A.drawBattleBG(ctx, BOSSES.find(b => b.final) || BOSSES[BOSSES.length - 1], T * 0.3);
+    A.px(ctx, 70, 70, 500, 340, 'rgba(8,8,20,0.88)');
+    const ch = G.CH2_CHOICE || {};
+    A.text(ctx, ch.title || 'ВЫБОР ГАЛЬКИ', 320, 112, { size: 30, color: '#ffe6a0', align: 'center' });
+    A.text(ctx, ch.question || 'ЧТО ДЕЛАТЬ?', 320, 158, { size: 14, color: '#fff4c8', align: 'center', shadow: false });
+    (ch.options || []).forEach((o, i) => {
+      const sel = i === ch2ChoiceIndex;
+      A.text(ctx, (sel ? '▶ ' : '   ') + o.label, 320, 232 + i * 48, {
+        size: 18, color: sel ? '#ffe6a0' : '#aab3dd', align: 'center'
+      });
+    });
+    A.text(ctx, 'ГЛАВА 3 ЗАВИСИТ ОТ ЭТОГО ВЫБОРА', 320, 372, { size: 11, color: '#8affc8', align: 'center', shadow: false });
   }
 
   function drawEnding() {
@@ -2450,6 +2722,12 @@
           clearPressed();
           return;
         }
+        if (o === 'ВЫБОР ГЛАВЫ') {
+          state = 'chapterSelect';
+          titleIndex = 0;
+          clearPressed();
+          return;
+        }
         if (o === 'ПРОДОЛЖИТЬ') { if (!loadGame()) newGame(); }
         else newGame();
         state = 'world';
@@ -2458,6 +2736,33 @@
                { who: 'gal', text: 'Чай. Потом школа. Без объяснений.' }]);
         }
       }
+    } else if (state === 'chapterSelect') {
+      const opts = chapterOptions(), n = opts.length;
+      if (chapterIndex >= n) chapterIndex = 0;
+      if (pressed.up) { chapterIndex = (chapterIndex - 1 + n) % n; AU.sfx('move'); }
+      if (pressed.down) { chapterIndex = (chapterIndex + 1) % n; AU.sfx('move'); }
+      if (pressed.z) {
+        const o = opts[chapterIndex];
+        if (!o.open) {
+          AU.sfx('back');
+          showToast(game.chapter1Done ? 'ГЛАВА 3 В РАЗРАБОТКЕ.' : 'Сначала пройди ГЛАВУ 1.');
+        } else if (chapterIndex === 0) {
+          newGame();
+          state = 'world';
+          say([{ who: 'sys', text: 'Галька проснулась. Восьмой год в школе. Шестой — с классом 6 «И». Сегодня опять кричать.' },
+               { who: 'gal', text: 'Чай. Потом школа. Без объяснений.' }]);
+        } else {
+          startChapter2();
+        }
+        clearPressed();
+        return;
+      }
+      if (pressed.x) { state = 'title'; titleIndex = 0; clearPressed(); return; }
+    } else if (state === 'ch2Choice') {
+      const n = (G.CH2_CHOICE || {}).options ? G.CH2_CHOICE.options.length : 0;
+      if (n && pressed.up) { ch2ChoiceIndex = (ch2ChoiceIndex - 1 + n) % n; AU.sfx('move'); }
+      if (n && pressed.down) { ch2ChoiceIndex = (ch2ChoiceIndex + 1) % n; AU.sfx('move'); }
+      if (pressed.z) { AU.sfx('select'); finishChapter2Choice(); }
     } else if (state === 'world') {
       updateOverworld(dt);
     } else if (state === 'battle') {
@@ -2506,6 +2811,8 @@
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
     if (state === 'title') drawTitle();
+    else if (state === 'chapterSelect') drawChapterSelect();
+    else if (state === 'ch2Choice') drawCh2Choice();
     else if (state === 'world') drawOverworld();
     else if (state === 'battle') drawBattle();
     else if (state === 'gameover') drawGameOver();
@@ -2553,7 +2860,7 @@
 
   G.debug = {
     game, startBattle, bossById, questFoeFor, questBossById, npcTalk, enterRoom, getState: () => state, say, makeBattle, buildSchedule,
-    startNewGame: newGame,
+    startNewGame: newGame, startChapter2, chapterOptions,
     netSnap: () => netSnap,
     netInfo: () => ({
       mode: netMode, selfIndex: netSelfIndex,
