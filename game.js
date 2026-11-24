@@ -165,6 +165,19 @@
   canvas.addEventListener('pointerdown', e => {
     AU.ensure();
     if (e.pointerType === 'touch') setInputMode(true);
+    /* Menus are clickable too — not only with the keyboard/OK button. */
+    if (state === 'title' || state === 'chapterSelect' || state === 'ch2Choice' ||
+        state === 'gameover' || state === 'ending') {
+      if (state === 'ch2Choice') {
+        const rect = canvas.getBoundingClientRect();
+        const cy = (e.clientY - rect.top) * canvas.height / (rect.height || 1);
+        const opts = (G.CH2_CHOICE && G.CH2_CHOICE.options) || [];
+        opts.forEach((o, i) => {
+          if (Math.abs(cy - (232 + i * 48)) < 26) ch2ChoiceIndex = i;
+        });
+      }
+      pressed.z = true;
+    }
   });
   window.addEventListener('pointerdown', e => {
     if (e.pointerType === 'touch') setInputMode(true);
@@ -1398,11 +1411,14 @@
     game.dialogue.npcName = n.name;
     if (n.boss && G.images[n.boss]) game.dialogue.img = G.images[n.boss];
     if (n.id === 'cat') game.dialogue.img = null;
+    const alreadyTaken = !!(n.flag && game.flags[n.flag]);
     if (n.flag) game.flags[n.flag] = true;
-    if (n.give) {
+    if (n.give && !alreadyTaken) {
       Object.keys(n.give).forEach(k => { game.inv[k] = (game.inv[k] || 0) + n.give[k]; });
       AU.sfx('save');
       if (n.flag) showToast('✦ НАЙДЕНО: ' + (n.flag === 'canteenNotebook' ? 'ТЕТРАДЬ АБАЮНДЫ' : n.flag === 'kioskPaper' ? 'ГАЗЕТА' : n.flag === 'tunnelGraffiti' ? 'ГРАФФИТИ' : 'ДОКЛАД'));
+    } else if (n.give) {
+      showToast('Ты уже забирала это. Больше не дают.');
     }
   }
 
@@ -3007,10 +3023,16 @@
       }
       if (pressed.x) { state = 'title'; titleIndex = 0; clearPressed(); return; }
     } else if (state === 'ch2Choice') {
+      /* After choosing, the closing text must play instead of re-choosing. */
+      if (game.dialogue) {
+        game.dialogue.update(dt);
+        clearPressed();
+        return;
+      }
       const n = (G.CH2_CHOICE || {}).options ? G.CH2_CHOICE.options.length : 0;
       if (n && pressed.up) { ch2ChoiceIndex = (ch2ChoiceIndex - 1 + n) % n; AU.sfx('move'); }
       if (n && pressed.down) { ch2ChoiceIndex = (ch2ChoiceIndex + 1) % n; AU.sfx('move'); }
-      if (pressed.z) { AU.sfx('select'); finishChapter2Choice(); }
+      if (pressed.z) { AU.sfx('select'); finishChapter2Choice(); clearPressed(); }
     } else if (state === 'world') {
       updateOverworld(dt);
     } else if (state === 'battle') {
