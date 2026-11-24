@@ -162,26 +162,42 @@
       down[k] = !!stickHeld[k];
     }
   });
+  function choiceRowAt(e) {
+    const rect = canvas.getBoundingClientRect();
+    const cy = (e.clientY - rect.top) * canvas.height / (rect.height || 1);
+    if (cy < 200 || cy > 320) return null;
+    const opts = (G.CH2_CHOICE && G.CH2_CHOICE.options) || [];
+    let best = null, dist = 1e9;
+    opts.forEach((o, i) => {
+      const d = Math.abs(cy - (232 + i * 48));
+      if (d < dist) { dist = d; best = i; }
+    });
+    return best;
+  }
   canvas.addEventListener('pointerdown', e => {
     AU.ensure();
+    /* Measure BEFORE setInputMode(): switching to phone layout resizes the
+       canvas and would make the tap land on the wrong row. */
+    const row = (state === 'ch2Choice' && !game.dialogue) ? choiceRowAt(e) : null;
     if (e.pointerType === 'touch') setInputMode(true);
-    /* Menus are clickable too — not only with the keyboard/OK button. */
-    if (state === 'title' || state === 'chapterSelect' || state === 'ch2Choice' ||
-        state === 'gameover' || state === 'ending') {
-      if (state === 'ch2Choice') {
-        const rect = canvas.getBoundingClientRect();
-        const cy = (e.clientY - rect.top) * canvas.height / (rect.height || 1);
-        const opts = (G.CH2_CHOICE && G.CH2_CHOICE.options) || [];
-        opts.forEach((o, i) => {
-          if (Math.abs(cy - (232 + i * 48)) < 26) ch2ChoiceIndex = i;
-        });
-      }
-      pressed.z = true;
+    /* The final choice is handled HERE, not only in the game loop — some
+       phones swallow synthetic key events, and lobbies can skip updates. */
+    if (state === 'ch2Choice') {
+      if (game.dialogue) { pressed.z = true; return; }
+      if (row !== null) confirmCh2Choice(row);
+      return;
     }
+    if (state === 'title' || state === 'chapterSelect' ||
+        state === 'gameover' || state === 'ending') pressed.z = true;
   });
-  window.addEventListener('pointerdown', e => {
-    if (e.pointerType === 'touch') setInputMode(true);
-  }, true);
+  /* iOS sometimes delivers click after pointerdown; the lock makes it safe. */
+  canvas.addEventListener('click', e => {
+    if (state !== 'ch2Choice') return;
+    const row = choiceRowAt(e);
+    if (row !== null) confirmCh2Choice(row);
+  });
+  /* NOTE: no global capture-phase pointerdown here. It used to resize the
+     frame before the canvas handler measured a tap, moving menu rows. */
   document.getElementById('muteBtn').addEventListener('click', toggleMute);
   document.getElementById('newGameBtn').addEventListener('click', () => {
     AU.ensure();
@@ -214,6 +230,11 @@
       AU.ensure();
       setInputMode(true);
       wake();
+      /* On the final screen the OK button confirms directly. */
+      if (state === 'ch2Choice' && k === 'z' && !game.dialogue && !ch2ChoiceLocked) {
+        confirmCh2Choice(ch2ChoiceIndex);
+        return;
+      }
       if (!down[k]) pressed[k] = true;
       down[k] = true;
     });
@@ -339,6 +360,7 @@
   let T = 0;
   let titleIndex = 0;
   let ch2ChoiceIndex = 0;
+  let ch2ChoiceLocked = false;
   let chapterIndex = 0;
   let ch2MarkerCooldown = 0;
   let liveTick = 0;
@@ -2244,8 +2266,23 @@
     sayCh2((G.CH2_FINALE || []).slice(), () => {
       state = 'ch2Choice';
       ch2ChoiceIndex = 0;
+      ch2ChoiceLocked = false;
       AU.sfx('select');
     }, 'СТАРШИЙ ПАЦАН');
+  }
+
+  /* One entry point for taps, the OK button and the keyboard. */
+  function confirmCh2Choice(row) {
+    if (state !== 'ch2Choice' || game.dialogue || ch2ChoiceLocked) return false;
+    const opts = (G.CH2_CHOICE || {}).options || [];
+    if (row === null || row === undefined) row = ch2ChoiceIndex;
+    if (!opts[row]) return false;
+    ch2ChoiceIndex = row;
+    ch2ChoiceLocked = true;
+    AU.ensure();
+    AU.sfx('select');
+    finishChapter2Choice();
+    return true;
   }
 
   function finishChapter2Choice() {
@@ -2896,11 +2933,16 @@
     A.text(ctx, ch.question || 'ЧТО ДЕЛАТЬ?', 320, 158, { size: 14, color: '#fff4c8', align: 'center', shadow: false });
     (ch.options || []).forEach((o, i) => {
       const sel = i === ch2ChoiceIndex;
+      A.panel(ctx, 120, 210 + i * 48, 400, 42, {
+        fill: sel ? 'rgba(70,52,20,.92)' : 'rgba(18,20,42,.92)',
+        border: sel ? '#ffe6a0' : '#6b72a8'
+      });
       A.text(ctx, (sel ? '▶ ' : '   ') + o.label, 320, 232 + i * 48, {
-        size: 18, color: sel ? '#ffe6a0' : '#aab3dd', align: 'center'
+        size: 17, color: sel ? '#ffe6a0' : '#c3caf0', align: 'center'
       });
     });
-    A.text(ctx, 'ГЛАВА 3 ЗАВИСИТ ОТ ЭТОГО ВЫБОРА', 320, 372, { size: 11, color: '#8affc8', align: 'center', shadow: false });
+    A.text(ctx, 'ТЫКНИ ПО СТРОКЕ ИЛИ НАЖМИ ОК', 320, 330, { size: 10, color: '#ffe6a0', align: 'center', shadow: false });
+    A.text(ctx, 'ГЛАВА 3 ЗАВИСИТ ОТ ЭТОГО ВЫБОРА', 320, 390, { size: 11, color: '#8affc8', align: 'center', shadow: false });
   }
 
   function drawEnding() {
@@ -3030,9 +3072,9 @@
         return;
       }
       const n = (G.CH2_CHOICE || {}).options ? G.CH2_CHOICE.options.length : 0;
-      if (n && pressed.up) { ch2ChoiceIndex = (ch2ChoiceIndex - 1 + n) % n; AU.sfx('move'); }
-      if (n && pressed.down) { ch2ChoiceIndex = (ch2ChoiceIndex + 1) % n; AU.sfx('move'); }
-      if (pressed.z) { AU.sfx('select'); finishChapter2Choice(); clearPressed(); }
+      if (!ch2ChoiceLocked && n && pressed.up) { ch2ChoiceIndex = (ch2ChoiceIndex - 1 + n) % n; AU.sfx('move'); }
+      if (!ch2ChoiceLocked && n && pressed.down) { ch2ChoiceIndex = (ch2ChoiceIndex + 1) % n; AU.sfx('move'); }
+      if (pressed.z) { confirmCh2Choice(ch2ChoiceIndex); clearPressed(); }
     } else if (state === 'world') {
       updateOverworld(dt);
     } else if (state === 'battle') {
