@@ -708,6 +708,8 @@
       bgTop: '#13251f', bgBottom: '#050b0a'
     },
     gangColors: ['#8affc8', '#8ecbff', '#ffe6a0', '#ff9ec0', '#c8a6ff', '#ffb87a'],
+    /* Six different pictures — not one guy drawn six times. */
+    members: ['loma', 'byba', 'petrunya', 'masha', 'pastuh', 'shesterka'],
     intro: [
       L('sys', 'Шесть ровных пацанов встали стеной. Не по очереди. Сразу.'),
       L('crew', 'Ты выбрала драку. Тогда считай.'),

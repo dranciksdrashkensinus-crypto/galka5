@@ -446,7 +446,7 @@
     game.roomId = 'home';
     game.hp = 30; game.maxHp = 30; game.lov = 1; game.exp = 0;
     game.kills = 0; game.spares = 0;
-    game.inv = { pie: 2, tea: 1, candy: 3 };
+    game.inv = { pie: 2, tea: 2, candy: 3 };
     game.flags = {}; game.defeated = {}; game.spared = {};
     game.questsDone = 0; game.startedAt = Date.now(); game.ch2StartedAt = 0;
     game.chapter = 1; game.chapter1Done = progress.chapter1Done;
@@ -1086,18 +1086,29 @@
       A.text(ctx, who, x + 21, y + 3, { size: 12, color: '#ffe6a0', shadow: false });
     }
     let img = this.img || null;
-    if (line.who === 'gal') img = heroImage();
-    else if (line.who === 'sys') img = null;
-    const textX = img ? x + 96 : x + 22;
-    const textW = img ? w - 120 : w - 42;
-    if (img && img.complete && img.naturalWidth > 0) {
+    let imgs = this.imgs || null;
+    if (line.who === 'gal') { img = heroImage(); imgs = null; }
+    else if (line.who === 'sys') { img = null; imgs = null; }
+    const hasImg = !!(imgs && imgs.length) || !!(img && img.complete && img.naturalWidth > 0);
+    const textX = hasImg ? x + 96 : x + 22;
+    const textW = hasImg ? w - 120 : w - 42;
+    if (imgs && imgs.length) {
+      /* Six different faces in a 3×2 grid. */
+      const cw = 24, ch = 39;
+      imgs.slice(0, 6).forEach((im, i) => {
+        A.portrait(ctx, im, x + 12 + (i % 3) * cw, y + 14 + Math.floor(i / 3) * ch,
+          cw - 1, ch - 1, { bg: '#0d1020', t: T, zoom: 1.02 });
+      });
+      A.px(ctx, x + 12, y + 14, 72, 2, '#ffe6a0');
+      A.px(ctx, x + 12, y + 90, 72, 2, '#ffe6a0');
+    } else if (img && img.complete && img.naturalWidth > 0) {
       A.portrait(ctx, img, x + 12, y + 14, 72, 78, { bg: '#0d1020', t: T, zoom: 1.05 });
       A.px(ctx, x + 12, y + 14, 72, 2, '#ffe6a0');
       A.px(ctx, x + 12, y + 90, 72, 2, '#ffe6a0');
     }
     const big = document.body.classList.contains('touch-mode');
     const fontSize = big ? 17 : 15;
-    const key = line.text + '|' + textW + '|' + who + '|' + (img ? 1 : 0) + '|' + fontSize;
+    const key = line.text + '|' + textW + '|' + who + '|' + (img ? 1 : 0) + '|' + (imgs ? imgs.length : 0) + '|' + fontSize;
     if (this.cacheKey !== key) {
       this.cacheKey = key;
       this.wrapped = A.wrap(ctx, line.text, textW, fontSize);
@@ -1750,7 +1761,15 @@
 
   function sayBattle(lines, next) {
     game.dialogue = new Dialog(game.battle.boss.name, lines, () => { next(); });
-    if (game.battle) game.dialogue.img = bossImage(game.battle.boss);
+    if (game.battle) {
+      const boss = game.battle.boss;
+      if (boss.gang && boss.members) {
+        /* Show all six faces in the dialogue box, not a single portrait. */
+        game.dialogue.imgs = boss.members.map(k => G.images[k]).filter(Boolean);
+      } else {
+        game.dialogue.img = bossImage(boss);
+      }
+    }
   }
 
   function buildSchedule(b) {
@@ -2408,10 +2427,14 @@
     /* Chapter 2 gets its OWN leaderboard entry, separate from chapter 1. */
     if (G.accounts && G.accounts.recordChapter2) G.accounts.recordChapter2(game);
     if (choice.id === 'fight' && CREW_GANG) {
-      /* Our guys give Галька five teas right before the fight. */
-      game.inv.tea = (game.inv.tea || 0) + 5;
-      saveGame();
-      showToast('✦ ПАЦАНЫ ДАЛИ ТЕБЕ 5 ЧАЕВ. ПЕРЕД ДРАКОЙ.');
+      /* Start of the game = 2 teas. The guys add exactly 5 once, right
+         before the fight. The flag stops a second confirmation adding more. */
+      if (!game.flags.gotCrewTea) {
+        game.flags.gotCrewTea = true;
+        game.inv.tea = (game.inv.tea || 0) + 5;
+        saveGame();
+        showToast('✦ ПАЦАНЫ ДАЛИ ТЕБЕ 5 ЧАЕВ. ПЕРЕД ДРАКОЙ.');
+      }
       sayCh2([
         { who: 'crew', text: 'На. Пять чаев. Перед дракой — как надо.' },
         { who: 'gal', text: 'Пять. Ладно. Без объяснений.' },
@@ -2718,17 +2741,19 @@
     const pulse = b.phase2 ? 1 + Math.sin(T * 6) * 0.03 : 1;
     const tiny = b.boss.id === 'director' ? 0.72 : 1;
     if (b.boss.gang) {
-      /* All six ровные пацаны are on screen at the same time. */
+      /* Six DIFFERENT guys, each with his own picture, on screen at once. */
       const xs = [185, 239, 293, 347, 401, 455];
+      const members = b.boss.members || [];
       xs.forEach((x, i) => {
+        const key = members[i] || '';
         ctx.save();
-        ctx.translate(x, 196); ctx.scale(pulse * 0.55, pulse * 0.55); ctx.translate(-x, -196);
-        A.drawChar(ctx, bossImage(b.boss), x, 288 + (i % 2) * 6, Math.floor(T * 3) % 3, {
+        ctx.translate(x, 196); ctx.scale(pulse * 0.52, pulse * 0.52); ctx.translate(-x, -196);
+        A.drawChar(ctx, G.images[key] || null, x, 288 + (i % 2) * 6, Math.floor(T * 3) % 3, {
           width: 112, height: 132, legH: 20,
           legColor: '#1c2b26', bootColor: '#0a1010',
           tint: b.slash > 0 ? '#ffffff' : null, tintAlpha: 0.55,
           outline: (b.boss.gangColors || [])[i] || b.boss.colors.main,
-          fallback: 'crew' + (i + 1)
+          fallback: key || 'crew' + (i + 1)
         });
         ctx.restore();
       });
@@ -2765,11 +2790,19 @@
       ctx.restore();
     }
 
-    // portrait + info
-    A.portrait(ctx, bossImage(b.boss), 20, 24, 124, 124, {
-      bg: b.boss.colors.dark, flash: b.slash > 0.2 ? (b.slash - 0.2) * 1.4 : 0,
-      fallback: b.boss.id, t: T
-    });
+    // portrait + info — six different faces for the six guys
+    if (b.boss.gang && b.boss.members) {
+      const cw = 41, ch = 62;
+      b.boss.members.slice(0, 6).forEach((k, i) => {
+        A.portrait(ctx, G.images[k] || null, 20 + (i % 3) * cw, 24 + Math.floor(i / 3) * ch,
+          cw - 1, ch - 1, { bg: b.boss.colors.dark, fallback: k, t: T });
+      });
+    } else {
+      A.portrait(ctx, bossImage(b.boss), 20, 24, 124, 124, {
+        bg: b.boss.colors.dark, flash: b.slash > 0.2 ? (b.slash - 0.2) * 1.4 : 0,
+        fallback: b.boss.id, t: T
+      });
+    }
     A.px(ctx, 20, 24, 124, 4, b.boss.colors.main);
     A.px(ctx, 20, 144, 124, 4, b.boss.colors.main);
     A.text(ctx, b.boss.name, 158, 42, { size: 17, color: b.boss.colors.light });
