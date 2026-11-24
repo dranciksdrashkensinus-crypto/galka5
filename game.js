@@ -327,6 +327,7 @@
   let titleIndex = 0;
   let ch2ChoiceIndex = 0;
   let chapterIndex = 0;
+  let ch2MarkerCooldown = 0;
   let liveTick = 0;
   let toast = { text: '', time: 0 };
 
@@ -403,6 +404,7 @@
     game.ch2Choice = progress.ch2Choice;
   }
   readProgress();
+  syncChapterNpcs();
 
   function newGame() {
     game.roomId = 'home';
@@ -791,6 +793,37 @@
     return !!(n && (n.ch2Boss || n.ch2Spy || n.ch2Ambush || n.ch2Boy || n.ch2Finale));
   }
 
+  /* Chapter 2 markers must not exist at all in chapter 1 — not even as
+     invisible NPCs. Add them only when the player is actually in chapter 2. */
+  function syncChapterNpcs() {
+    const markers = G.CH2_MARKERS || [];
+    const wanted = game.chapter === 2;
+    for (const roomId in ROOMS) {
+      const list = ROOMS[roomId].npcs || (ROOMS[roomId].npcs = []);
+      for (const mk of markers) {
+        if (mk.room !== roomId) continue;
+        const i = list.indexOf(mk.npc);
+        if (wanted && i < 0) list.push(mk.npc);
+        if (!wanted && i >= 0) list.splice(i, 1);
+      }
+    }
+  }
+
+  /* Walking onto the current marker is enough — no need to hunt for Z. */
+  function activeCh2MarkerNear() {
+    if (game.chapter !== 2 || state !== 'world' || game.dialogue || game.fade || ch2MarkerCooldown > 0) return null;
+    const o = ch2Objective();
+    if (!o) return null;
+    for (const n of (ROOMS[game.roomId].npcs || [])) {
+      if (!n.ch2Spy && !n.ch2Ambush) continue;
+      if (n.x !== o.x || n.y !== o.y) continue;
+      if (Math.hypot(n.x - game.player.x, n.y - game.player.y) > 34) continue;
+      if (n.ch2Spy && !game.flags['ch2Spy_' + n.ch2Spy] && game.flags['ch2Active_' + n.ch2Spy]) return n;
+      if (n.ch2Ambush && game.flags['ch2Report_' + n.ch2Ambush] && !game.flags['ch2Done_' + n.ch2Ambush]) return n;
+    }
+    return null;
+  }
+
   /* Chapter 2 talks use the "crew" tag. Show a real name instead of CREW. */
   function sayCh2(lines, cb, name) {
     say(lines, cb, 'npc');
@@ -856,7 +889,7 @@
     if (step) {
       A.text(ctx, 'ДАЛЬШЕ: ' + step.label, 22, 116, { size: 9, color: '#ffe6a0', align: 'left', shadow: false });
     } else {
-      A.text(ctx, 'ЦЕЛЬ РЯДОМ — ИДИ К МЕТКЕ', 22, 116, { size: 9, color: '#8ff5ff', align: 'left', shadow: false });
+      A.text(ctx, 'ЦЕЛЬ РЯДОМ — ПОДОЙДИ К МЕТКЕ (ИЛИ НАЖМИ Z)', 22, 116, { size: 9, color: '#8ff5ff', align: 'left', shadow: false });
       const bob = Math.sin(T * 5) * 5;
       ctx.strokeStyle = '#8affc8';
       ctx.lineWidth = 2;
@@ -896,6 +929,7 @@
 
   function enterRoom(id, spawn, instant) {
     const doIt = () => {
+      syncChapterNpcs();
       const roomChanged = id !== game.roomId;
       game.roomId = id;
       const r = ROOMS[id];
@@ -1403,7 +1437,12 @@
         }
       }
 
-      if (pressed.z) {
+      const autoMarker = activeCh2MarkerNear();
+      if (autoMarker) {
+        AU.sfx('select');
+        ch2MarkerCooldown = 1.0;
+        npcTalk(autoMarker);
+      } else if (pressed.z) {
         const n = nearestNpc();
         if (n) { AU.sfx('select'); npcTalk(n); }
       }
@@ -2830,6 +2869,7 @@
   function update(dt) {
     T += dt;
     toast.time = Math.max(0, toast.time - dt);
+    ch2MarkerCooldown = Math.max(0, ch2MarkerCooldown - dt);
 
     if (G.netui && G.netui.isOpen && G.netui.isOpen()) {
       clearPressed();
@@ -3041,6 +3081,7 @@
   G.debug = {
     game, startBattle, bossById, questFoeFor, questBossById, npcTalk, enterRoom, getState: () => state, say, makeBattle, buildSchedule,
     startNewGame: newGame, startChapter2, chapterOptions, ch2Objective, routeExitTo,
+    syncChapterNpcs, activeCh2MarkerNear,
     chapterProgress: () => Object.assign({}, progress),
     unlockChapter2: () => { progress.chapter1Done = true; game.chapter1Done = true; saveProgress(); },
     netSnap: () => netSnap,

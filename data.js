@@ -1297,7 +1297,7 @@
   /* ---------------- chapter 2: ровные пацаны ---------------- */
   G.CH2_MISSIONS = [
     {
-      boss: 'abayunda', short: 'АБАЮНДА', spyRoom: 'school', sx: 200, sy: 250, ambushRoom: 'corridor', ax: 320, ay: 250,
+      boss: 'abayunda', short: 'АБАЮНДА', spyRoom: 'school', sx: 320, sy: 250, ambushRoom: 'corridor', ax: 320, ay: 250,
       intro: [L('crew', 'Посчитай подбородки Абаюнды. Потом скажи мне, сколько.'), L('gal', 'Считать умею. Без объяснений.')],
       spy: [L('sys', 'Ты притворилась ученицей и заглянула под парту.'), L('boss', 'Один... два... их thousand, я сбилась.'), L('gal', 'Записано.')],
       report: [L('gal', 'Тысяча. И все дрожат.'), L('crew', 'Тысяча — это число. Идём перехватим.')],
@@ -1396,13 +1396,22 @@
     ]
   };
 
-  /* Spy/ambush markers exist only in chapter 2. */
+  /* Spy/ambush markers are built here but added to rooms ONLY in chapter 2. */
+  G.CH2_MARKERS = [];
   G.CH2_MISSIONS.forEach(m => {
-    const sp = G.rooms[m.spyRoom];
-    if (sp) sp.npcs.push({ id: 'spy_' + m.boss, x: m.sx, y: m.sy, w: 30, h: 46, name: 'НАБЛЮДАТЕЛЬ', ch2Spy: m.boss });
-    const am = G.rooms[m.ambushRoom];
+    if (G.rooms[m.spyRoom]) {
+      G.CH2_MARKERS.push({
+        room: m.spyRoom,
+        npc: { id: 'spy_' + m.boss, x: m.sx, y: m.sy, w: 30, h: 46, name: 'НАБЛЮДАТЕЛЬ', ch2Spy: m.boss }
+      });
+    }
     /* Director already has his own NPC in the office — no second body on top. */
-    if (am && m.boss !== 'director') am.npcs.push({ id: 'amb_' + m.boss, x: m.ax, y: m.ay, w: 34, h: 52, name: 'ПЕРЕХВАТ', ch2Ambush: m.boss });
+    if (G.rooms[m.ambushRoom] && m.boss !== 'director') {
+      G.CH2_MARKERS.push({
+        room: m.ambushRoom,
+        npc: { id: 'amb_' + m.boss, x: m.ax, y: m.ay, w: 34, h: 52, name: 'ПЕРЕХВАТ', ch2Ambush: m.boss }
+      });
+    }
   });
 
   G.HELP = 'Движение — WASD/стрелки. Z — говорить и выбирать. X — назад. На телефоне — джойстик и ОК.';
