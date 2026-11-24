@@ -15,6 +15,10 @@
   let nextMessageAt = 0;
   let lastRender = 0;
   const shared = { users: {}, msgs: {}, deleted: {} };
+  const defaultStats = () => ({
+    completions: 0, bestMs: 0,
+    ch2Completions: 0, ch2BestMs: 0, ch2Fights: 0
+  });
 
   function read(key, fallback) {
     try {
@@ -44,7 +48,7 @@
     const u = current();
     if (!u) return;
     send('accounts/user/' + u.nick + '/profile', profileOf(u.nick, u), true);
-    send('accounts/user/' + u.nick + '/stats', Object.assign({ completions: 0, bestMs: 0 }, u.stats || {}), true);
+    send('accounts/user/' + u.nick + '/stats', Object.assign(defaultStats(), u.stats || {}), true);
     if (u.live) send('accounts/user/' + u.nick + '/live', u.live, true);
   }
   function requestSync() {
@@ -108,7 +112,7 @@
         created: has ? (p.created || l.created || 0) : (l.created || 0),
         banUntil: has ? (p.banUntil != null ? p.banUntil : (l.banUntil || 0)) : (l.banUntil || 0),
         banReason: p.banReason || l.banReason || '',
-        stats: s.stats || l.stats || { completions: 0, bestMs: 0 },
+        stats: Object.assign(defaultStats(), s.stats || l.stats || {}),
         live: s.live !== undefined ? s.live : (l.live || null),
         online: has
           ? !!(s.live && s.live.online !== false && Date.now() - (s.live.at || 0) < 120000)
@@ -159,7 +163,7 @@
     afterChange();
   }
   function writeStats(nick, stats) {
-    const s = Object.assign({ completions: 0, bestMs: 0 }, stats);
+    const s = Object.assign(defaultStats(), stats);
     const local = read(USERS_KEY, {});
     local[nick] = Object.assign({}, local[nick] || {}, { stats: s });
     write(USERS_KEY, local);
@@ -230,6 +234,7 @@
       '    <div class="top-tabs">',
       '      <button data-top="completions" class="active">ПО ПРОХОЖДЕНИЯМ</button>',
       '      <button data-top="speed">ПО СКОРОСТИ</button>',
+      '      <button data-top="ch2">ГЛАВА 2</button>',
       '      <button data-top="unknown">В РАЗРАБОТКЕ</button>',
       '    </div>',
       '    <div id="topList" class="acc-list"></div>',
@@ -310,7 +315,7 @@
       nick, salt, pass: passHash(nick, pass, salt),
       isAdmin: first, created, banUntil: 0, banReason: ''
     });
-    writeStats(nick, { completions: 0, bestMs: 0 });
+    writeStats(nick, defaultStats());
     writeLive(nick, { online: true, at: created, room: '', quests: 0, max: 0, bosses: 0, hp: 0 });
     saveSession({ nick, loginAt: created });
     publishMine();
@@ -368,6 +373,18 @@
     }
     const all = Object.values(users());
     let list;
+    if (topTab === 'ch2') {
+      /* Separate ladder: only chapter 2 completions, fastest run breaks ties. */
+      list = all.filter(u => (u.stats.ch2Completions || 0) > 0).sort((a, b) =>
+        (b.stats.ch2Completions || 0) - (a.stats.ch2Completions || 0) ||
+        (a.stats.ch2BestMs || Infinity) - (b.stats.ch2BestMs || Infinity));
+      box.innerHTML = list.length
+        ? list.map((u, i) => '<div class="top-row"><b>' + (i + 1) + '.</b> ' + esc(u.nick) +
+            '<span>' + (u.stats.ch2Completions || 0) + ' гл.2 · ' + fmtTime(u.stats.ch2BestMs) +
+            ' · побед ' + (u.stats.ch2Fights || 0) + '</span></div>').join('')
+        : '<div class="acc-empty">Пока никто не прошёл главу 2. Первый — ты.</div>';
+      return;
+    }
     if (topTab === 'completions') {
       list = all.sort((a, b) => (b.stats.completions || 0) - (a.stats.completions || 0));
       box.innerHTML = list.length
@@ -524,6 +541,27 @@
     writeStats(u.nick, stats);
   }
 
+  /* Глава 2 считается ОТДЕЛЬНО от первой: свой счётчик и своё время.
+     Время берём с момента старта главы 2, а не со старта первой. */
+  function recordChapter2(game) {
+    const u = current();
+    if (!u) return;
+    const stats = Object.assign(defaultStats(), u.stats || {});
+    stats.ch2Completions = (stats.ch2Completions || 0) + 1;
+    const from = game.ch2StartedAt || game.startedAt || Date.now();
+    const spent = Math.max(1000, Date.now() - from);
+    if (!stats.ch2BestMs || spent < stats.ch2BestMs) stats.ch2BestMs = spent;
+    writeStats(u.nick, stats);
+  }
+
+  function recordGangWin(game) {
+    const u = current();
+    if (!u) return;
+    const stats = Object.assign(defaultStats(), u.stats || {});
+    stats.ch2Fights = (stats.ch2Fights || 0) + 1;
+    writeStats(u.nick, stats);
+  }
+
   function updateLive(game) {
     const u = current();
     if (!u) return;
@@ -598,7 +636,7 @@
   });
 
   G.accounts = {
-    open, close, isOpen, tick, recordCompletion, updateLive,
+    open, close, isOpen, tick, recordCompletion, recordChapter2, recordGangWin, updateLive,
     isAdmin, current, users, deleteAccount,
     hideAdminTab: () => { const t = document.getElementById('accAdminTab'); if (t) t.classList.add('hidden'); }
   };
