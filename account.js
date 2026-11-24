@@ -7,6 +7,7 @@
   const USERS_KEY = 'galka_accounts_v2';
   const SESSION_KEY = 'galka_session_v2';
   const SEEN_KEY = 'galka_seen_v1';
+  const VOTES_KEY = 'galka_board_votes_v1';
   const overlay = document.getElementById('accountOverlay');
   const banner = document.getElementById('adminMessage');
   let activeTab = 'login';
@@ -15,6 +16,11 @@
   let nextMessageAt = 0;
   let lastRender = 0;
   const shared = { users: {}, msgs: {}, deleted: {} };
+  /* Administrative board: notices and polls are retained on the MQTT topic,
+     so they hang on the screens of everyone who opens the game. */
+  const board = {};
+  let boardEnd = null;
+  const lastActive = { notice: '', poll: '' };
   const defaultStats = () => ({
     completions: 0, bestMs: 0,
     ch2Completions: 0, ch2BestMs: 0, ch2Fights: 0
@@ -240,7 +246,24 @@
       '    <div id="topList" class="acc-list"></div>',
       '  </section>',
       '  <section class="acc-panel hidden" data-panel="admin">',
-      '    <p class="acc-note">ИГРОКИ СО ВСЕХ УСТРОЙСТВ. Бан и текст приходят на их экран.</p>',
+      '    <p class="acc-note">ИГРОКИ СО ВСЕХ УСТРОЙСТВ. Бан, текст, объявления и опросы приходят на их экран.</p>',
+      '    <div class="acc-buttons">',
+      '      <button data-action="toggleNotice">ОБЪЯВЛЕНИЕ</button>',
+      '      <button data-action="togglePoll">ВОПРОС</button>',
+      '    </div>',
+      '    <div class="board-form" data-board="notice">',
+      '      <label>ОБЪЯВЛЕНИЕ ВСЕМ<input id="adminNoticeText" maxlength="160" placeholder="Например: Галька, иди в класс"></label>',
+      '      <label>ВРЕМЯ, МИНУТ (1–1440)<input id="adminNoticeMin" type="number" min="1" max="1440" value="5"></label>',
+      '      <div class="acc-buttons"><button data-action="sendNotice" class="primary">ОПУБЛИКОВАТЬ</button></div>',
+      '      <div id="adminNoticeList" class="acc-list"></div>',
+      '    </div>',
+      '    <div class="board-form hidden" data-board="poll">',
+      '      <label>ВОПРОС<input id="adminPollQuestion" maxlength="160" placeholder="Например: солнце зелёное или жёлтое?"></label>',
+      '      <label>ВАРИАНТЫ ОТВЕТА: ДО 10, ПО ОДНОМУ В СТРОКУ<textarea id="adminPollOptions" rows="6" placeholder="Зелёное&#10;Жёлтое"></textarea></label>',
+      '      <label>ВРЕМЯ, МИНУТ (1–1440)<input id="adminPollMin" type="number" min="1" max="1440" value="3"></label>',
+      '      <div class="acc-buttons"><button data-action="sendPoll" class="primary">ОПУБЛИКОВАТЬ</button></div>',
+      '      <div id="adminPollList" class="acc-list"></div>',
+      '    </div>',
       '    <label>ТЕКСТ НА ЭКРАН ИГРОКА<input id="adminText" maxlength="160" placeholder="Например: Галька, иди в класс"></label>',
       '    <div id="adminList" class="acc-list"></div>',
       '    <div class="acc-buttons"><button data-action="refreshAdmin">ОБНОВИТЬ</button></div>',
@@ -297,6 +320,150 @@
     banner.classList.remove('hidden');
     if (bannerTimer) clearTimeout(bannerTimer);
     bannerTimer = setTimeout(() => banner.classList.add('hidden'), 6000);
+  }
+
+  /* ---------- общая доска: объявления и опросы для всех игроков ---------- */
+
+  function boardList() {
+    return Object.keys(board).map(k => board[k]).sort((a, b) => (b.at || 0) - (a.at || 0));
+  }
+  function pubBoard(obj) {
+    board[obj.id] = obj;
+    send('accounts/board/' + obj.id, obj, true);
+    renderAdminBoards();
+    renderBoard();
+  }
+  function minutes(id, fallback) {
+    const el = document.getElementById(id);
+    const n = Math.min(1440, Math.max(1, parseInt(el && el.value, 10) || fallback));
+    if (el) el.value = n;
+    return n;
+  }
+  function sendNotice() {
+    if (!isAdmin()) return msg('Только админ может публиковать объявления.', true);
+    const el = document.getElementById('adminNoticeText');
+    const text = ((el && el.value) || '').trim().slice(0, 160);
+    if (!text) return msg('Введи текст объявления.', true);
+    const min = minutes('adminNoticeMin', 5);
+    const at = Date.now();
+    pubBoard({
+      id: 'n' + at.toString(36) + Math.random().toString(36).slice(2, 5),
+      kind: 'notice', text, at, until: at + min * 60000,
+      from: ((session() || {}).nick) || ''
+    });
+    if (el) el.value = '';
+    msg('ОБЪЯВЛЕНИЕ НА ЭКРАНАХ ВСЕХ · ' + min + ' МИН.');
+  }
+  function sendPoll() {
+    if (!isAdmin()) return msg('Только админ может создавать опросы.', true);
+    const qEl = document.getElementById('adminPollQuestion');
+    const oEl = document.getElementById('adminPollOptions');
+    const question = ((qEl && qEl.value) || '').trim().slice(0, 160);
+    const options = String((oEl && oEl.value) || '')
+      .split(/\r?\n/).map(s => s.trim()).filter(Boolean).slice(0, 10);
+    if (!question || options.length < 2) return msg('Вопрос и минимум два варианта ответа — обязательно.', true);
+    const min = minutes('adminPollMin', 3);
+    const at = Date.now();
+    pubBoard({
+      id: 'p' + at.toString(36) + Math.random().toString(36).slice(2, 5),
+      kind: 'poll', question, options, at, until: at + min * 60000,
+      from: ((session() || {}).nick) || ''
+    });
+    if (qEl) qEl.value = '';
+    if (oEl) oEl.value = '';
+    msg('ОПРОС НА ЭКРАНАХ ВСЕХ · ' + options.length + ' ВАРИАНТОВ · ' + min + ' МИН.');
+  }
+  function removeBoard(id) {
+    if (!isAdmin()) return msg('Только админ может удалять сообщения.', true);
+    const it = board[id];
+    if (!it) return;
+    delete board[id];
+    lastActive[it.kind] = '';
+    send('accounts/board/' + id, null, true);
+    boardEnd = {
+      kind: it.kind,
+      text: it.kind === 'notice' ? 'ОБЪЯВЛЕНИЕ УДАЛЕНО АДМИНИСТРАТОРОМ' : 'ОПРОС УДАЛЁН АДМИНИСТРАТОРОМ',
+      until: Date.now() + 3500
+    };
+    renderAdminBoards();
+    renderBoard();
+    msg('УДАЛЕНО С ЭКРАНОВ ВСЕХ ИГРОКОВ.');
+  }
+  function toggleBoard(kind) {
+    const el = overlay && overlay.querySelector('[data-board="' + kind + '"]');
+    if (el) el.classList.toggle('hidden');
+  }
+
+  function renderAdminBoards() {
+    if (!isAdmin()) return;
+    const list = boardList(), now = Date.now();
+    const notices = list.filter(x => x.kind === 'notice');
+    const polls = list.filter(x => x.kind === 'poll');
+    const nBox = document.getElementById('adminNoticeList');
+    const pBox = document.getElementById('adminPollList');
+    if (nBox) nBox.innerHTML = notices.length ? notices.map(x =>
+      '<div class="board-entry">' + esc(x.text) + ' <small>· ' + fmtTime(x.until - now) + '</small>' +
+      '<button data-action="delNotice" data-id="' + esc(x.id) + '">УДАЛИТЬ</button></div>').join('')
+      : '<div class="acc-empty">Нет активных объявлений.</div>';
+    if (pBox) pBox.innerHTML = polls.length ? polls.map(x =>
+      '<div class="board-entry">' + esc(x.question) + ' <small>· ' + (x.options || []).length +
+      ' вар. · ' + fmtTime(x.until - now) + '</small>' +
+      '<button data-action="delPoll" data-id="' + esc(x.id) + '">ЗАКРЫТЬ</button></div>').join('')
+      : '<div class="acc-empty">Нет активных опросов.</div>';
+  }
+
+  function renderBoard() {
+    const now = Date.now();
+    /* Expired items are gone everywhere; show a short "finished" line. */
+    Object.keys(board).forEach(id => {
+      const it = board[id];
+      if (it && it.until > now) return;
+      if (it && lastActive[it.kind] === id) {
+        boardEnd = {
+          kind: it.kind,
+          text: it.kind === 'notice' ? 'ОБЪЯВЛЕНИЕ ЗАВЕРШЕНО' : 'ОПРОС ЗАВЕРШЁН',
+          until: now + 3500
+        };
+        lastActive[it.kind] = '';
+      }
+      delete board[id];
+    });
+
+    const noticeEl = document.getElementById('adminNotice');
+    const pollEl = document.getElementById('adminPoll');
+    const notice = boardList().filter(x => x.kind === 'notice')[0];
+    const poll = boardList().filter(x => x.kind === 'poll')[0];
+
+    if (noticeEl) {
+      if (notice) {
+        lastActive.notice = notice.id;
+        noticeEl.innerHTML = '📢 ' + esc(notice.text) +
+          '<small> · ОСТАЛОСЬ ' + fmtTime(notice.until - now) + '</small>';
+        noticeEl.classList.remove('hidden');
+      } else if (boardEnd && boardEnd.kind === 'notice' && boardEnd.until > now) {
+        noticeEl.textContent = boardEnd.text;
+        noticeEl.classList.remove('hidden');
+      } else noticeEl.classList.add('hidden');
+    }
+
+    if (pollEl) {
+      if (poll) {
+        lastActive.poll = poll.id;
+        const votes = read(VOTES_KEY, {});
+        const chosen = votes[poll.id];
+        const options = (poll.options || []).slice(0, 10);
+        pollEl.innerHTML = '<div class="board-q">❓ ' + esc(poll.question) +
+          '<small> · ОСТАЛОСЬ ' + fmtTime(poll.until - now) + '</small></div>' +
+          '<div class="board-opts">' + options.map((o, i) =>
+            '<button type="button" data-vote="' + i + '"' + (chosen === i ? ' class="active"' : '') + '>' +
+            (i + 1) + '. ' + esc(o) + '</button>').join('') + '</div>' +
+          (chosen != null ? '<div class="board-answer">ТВОЙ ОТВЕТ: ' + esc(options[chosen] || '') + '</div>' : '');
+        pollEl.classList.remove('hidden');
+      } else if (boardEnd && boardEnd.kind === 'poll' && boardEnd.until > now) {
+        pollEl.textContent = boardEnd.text;
+        pollEl.classList.remove('hidden');
+      } else pollEl.classList.add('hidden');
+    }
   }
 
   function doRegister() {
@@ -421,6 +588,7 @@
         '</div>'
       ].join('');
     }).join('') : '<div class="acc-empty">Нет аккаунтов.</div>';
+    renderAdminBoards();
   }
 
   function mutate(nick, fn) {
@@ -475,6 +643,11 @@
       else if (act === 'login') doLogin();
       else if (act === 'logout') doLogout();
       else if (act === 'refreshAdmin') renderAdmin();
+      else if (act === 'toggleNotice') toggleBoard('notice');
+      else if (act === 'togglePoll') toggleBoard('poll');
+      else if (act === 'sendNotice') sendNotice();
+      else if (act === 'sendPoll') sendPoll();
+      else if (act === 'delNotice' || act === 'delPoll') removeBoard(btn.dataset.id);
       else if (act === 'ban') mutate(nick, x => { x.banUntil = -1; x.online = false; });
       else if (act === 'ban1h') mutate(nick, x => { x.banUntil = Date.now() + 3600000; });
       else if (act === 'unban') mutate(nick, x => { x.banUntil = 0; });
@@ -496,6 +669,18 @@
       if (e.key === 'Escape') close();
     });
   }
+
+  const pollEl = document.getElementById('adminPoll');
+  if (pollEl) pollEl.addEventListener('click', e => {
+    const b = e.target.closest('[data-vote]');
+    if (!b) return;
+    const cur = boardList().filter(x => x.kind === 'poll')[0];
+    if (!cur) return;
+    const votes = read(VOTES_KEY, {});
+    votes[cur.id] = parseInt(b.dataset.vote, 10);
+    write(VOTES_KEY, votes);
+    renderBoard();
+  });
 
   function tick() {
     const u = current();
@@ -610,6 +795,12 @@
         shared.msgs[nick] = shared.msgs[nick] || {};
         if (val) shared.msgs[nick][id] = val; else delete shared.msgs[nick][id];
         afterChange();
+      } else if (parts[0] === 'accounts' && parts[1] === 'board' && parts.length >= 3) {
+        const id = parts[2];
+        if (val && val.id && val.until > Date.now()) board[id] = val;
+        else delete board[id];
+        renderAdminBoards();
+        renderBoard();
       } else if (parts[0] === 'accounts' && parts[1] === 'sync' && parts[2] === 'request') {
         publishMine();
       }
@@ -620,6 +811,7 @@
       G.net.listen('accounts/user/+/#');
       G.net.listen('accounts/msg/+/#');
       G.net.listen('accounts/sync/#');
+      G.net.listen('accounts/board/#');
       publishMine();
       requestSync();
       setInterval(() => { publishMine(); }, 15000);
@@ -627,6 +819,10 @@
       updateNetBadge();
     });
   }
+
+  /* Countdowns run even when no account overlay is open. */
+  setInterval(renderBoard, 1000);
+  renderBoard();
 
   window.addEventListener('beforeunload', () => {
     const s = session();
@@ -638,6 +834,7 @@
   G.accounts = {
     open, close, isOpen, tick, recordCompletion, recordChapter2, recordGangWin, updateLive,
     isAdmin, current, users, deleteAccount,
+    sendNotice, sendPoll, removeBoard, tickBoard: renderBoard, boardItems: boardList,
     hideAdminTab: () => { const t = document.getElementById('accAdminTab'); if (t) t.classList.add('hidden'); }
   };
 })(window.GALKA = window.GALKA || {});
