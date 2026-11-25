@@ -10,6 +10,13 @@
   const VOTES_KEY = 'galka_board_votes_v1';
   const BOARD_KEY = 'galka_board_v1';
   const RESULT_KEY = 'galka_board_result_v1';
+  const CREDS_KEY = 'galka_creds_v1';
+  /* Владелец админки закреплён за аккаунтом MEKIO. Публичный MQTT не даёт
+     надёжно хранить права: любой сохранённый профиль мог перезаписать флаг
+     isAdmin, поэтому право проверяется по нику, а не по сетевым данным. */
+  const ADMIN_NICK = 'MEKIO';
+  const ADMIN_RECOVERY = 'ГАЛЬКА-МЕКИО-2026';
+  function isAdminNick(nick) { return String(nick || '').toUpperCase() === ADMIN_NICK; }
   const overlay = document.getElementById('accountOverlay');
   const banner = document.getElementById('adminMessage');
   let activeTab = 'login';
@@ -76,9 +83,26 @@
   }
   const passHash = (nick, pass, salt) => hash('galka:' + nick.toLowerCase() + ':' + (salt || '') + ':' + pass);
 
-  function checkPass(u, nick, pass) {
-    if (u.salt) return u.pass === passHash(nick, pass, u.salt);
-    return u.pass === hash('galka:' + nick.toLowerCase() + ':' + pass);
+  /* Пароль хранится локально отдельно от общего профиля: публичный канал
+     мог перезаписать соль или хэш, из-за чего верный пароль не подходил. */
+  function allCreds() { return read(CREDS_KEY, {}); }
+  function credFor(nick) { return allCreds()[nick] || null; }
+  function saveCreds(nick, salt, pass) {
+    const all = allCreds();
+    all[nick] = { salt, pass };
+    write(CREDS_KEY, all);
+  }
+  function passMatches(rec, nick, pass) {
+    if (!rec) return false;
+    if (rec.salt) return rec.pass === passHash(nick, pass, rec.salt);
+    return rec.pass === hash('galka:' + nick.toLowerCase() + ':' + pass);
+  }
+  function matchedCred(nick, pass) {
+    const local = read(USERS_KEY, {})[nick] || null;
+    const remote = (shared.users[nick] || {}).profile || null;
+    const list = [credFor(nick), local, users()[nick], remote];
+    for (let i = 0; i < list.length; i++) if (passMatches(list[i], nick, pass)) return list[i];
+    return null;
   }
 
   const NICK_RE = /^[A-Za-zА-Яа-яЁёІіЇїЄєҐґ0-9_-]{3,16}$/;
@@ -116,9 +140,9 @@
       const has = !!(s.profile || s.stats || s.live);
       out[n] = Object.assign({}, l, {
         nick: n,
-        salt: has ? (p.salt || l.salt || '') : (l.salt || ''),
-        pass: has ? (p.pass || l.pass || '') : (l.pass || ''),
-        isAdmin: has ? (p.isAdmin != null ? !!p.isAdmin : !!l.isAdmin) : !!l.isAdmin,
+        salt: (credFor(n) || {}).salt || l.salt || (has ? p.salt : '') || '',
+        pass: (credFor(n) || {}).pass || l.pass || (has ? p.pass : '') || '',
+        isAdmin: isAdminNick(n),
         created: has ? (p.created || l.created || 0) : (l.created || 0),
         banUntil: has ? (p.banUntil != null ? p.banUntil : (l.banUntil || 0)) : (l.banUntil || 0),
         banReason: p.banReason || l.banReason || '',
@@ -132,15 +156,9 @@
     return out;
   }
 
-  // Если два игрока зарегистрировались одновременно, админом становится
-  // самый ранний аккаунт с пометкой isAdmin — результат одинаков у всех.
-  function adminNick() {
-    const all = users();
-    const claims = Object.keys(all).filter(n => all[n].isAdmin);
-    if (!claims.length) return '';
-    claims.sort((a, b) => (all[a].created || 0) - (all[b].created || 0) || a.localeCompare(b));
-    return claims[0];
-  }
+  // Админ всегда один и тот же аккаунт — MEKIO. Остальные профили, даже если
+  // в них осталась старая пометка isAdmin, прав не получают.
+  function adminNick() { return ADMIN_NICK; }
   function current() {
     const s = session();
     if (!s || !s.nick) return null;
@@ -157,7 +175,7 @@
   function profileOf(nick, u) {
     return {
       nick, salt: u.salt || '', pass: u.pass || '',
-      isAdmin: !!u.isAdmin, created: u.created || Date.now(),
+      isAdmin: isAdminNick(nick), created: u.created || Date.now(),
       banUntil: u.banUntil || 0, banReason: u.banReason || ''
     };
   }
@@ -231,7 +249,7 @@
       '    <label>НИК (RU / EN / UA)<input id="loginNick" maxlength="16" autocomplete="username"></label>',
       '    <label>ПАРОЛЬ<input id="loginPass" type="password" autocomplete="current-password"></label>',
       '    <div class="acc-buttons"><button data-action="login" class="primary">ВОЙТИ</button><button data-action="logout">ВЫЙТИ</button></div>',
-      '    <p class="acc-note">Аккаунты общие для всех устройств. Первый зарегистрированный — админ.</p>',
+      '    <p class="acc-note">Аккаунты общие для всех устройств. Админ — аккаунт MEKIO.</p>',
       '  </section>',
       '  <section class="acc-panel hidden" data-panel="register">',
       '    <label>НИК (RU / EN / UA, 3–16)<input id="regNick" maxlength="16" autocomplete="username"></label>',
@@ -565,15 +583,16 @@
     const pass2 = document.getElementById('regPass2').value || '';
     const all = users();
     if (!validNick(nick)) return msg('НИК: только RU/EN/UA буквы, цифры, _ и -, от 3 до 16.', true);
-    if (all[nick]) return msg('Этот ник уже занят на сервере.', true);
+    if (Object.keys(all).some(n => n.toLowerCase() === nick.toLowerCase())) return msg('Этот ник уже занят на сервере.', true);
     if (pass.length < 4) return msg('ПАРОЛЬ: минимум 4 символа.', true);
     if (pass !== pass2) return msg('Пароли не совпадают.', true);
     const salt = hash(nick + ':' + Date.now() + ':' + Math.random());
+    const storedPass = passHash(nick, pass, salt);
     const created = Date.now();
-    const first = !Object.keys(all).some(n => all[n].isAdmin);
+    saveCreds(nick, salt, storedPass);
     writeProfile(nick, {
-      nick, salt, pass: passHash(nick, pass, salt),
-      isAdmin: first, created, banUntil: 0, banReason: ''
+      nick, salt, pass: storedPass,
+      isAdmin: isAdminNick(nick), created, banUntil: 0, banReason: ''
     });
     writeStats(nick, defaultStats());
     writeLive(nick, { online: true, at: created, room: '', quests: 0, max: 0, bosses: 0, hp: 0 });
@@ -589,18 +608,33 @@
   }
 
   function doLogin() {
-    const nick = (document.getElementById('loginNick').value || '').trim();
+    const typed = (document.getElementById('loginNick').value || '').trim();
     const pass = document.getElementById('loginPass').value || '';
-    const all = users(), user = all[nick];
+    const all = users();
+    const nick = Object.keys(all).find(n => n.toLowerCase() === typed.toLowerCase()) || typed;
+    const user = all[nick];
     if (!user) return msg('Нет такого ника. Зарегистрируйся.', true);
-    const wasLegacy = !user.salt;
-    if (!checkPass(user, nick, pass)) return msg('Неверный пароль.', true);
-    if (wasLegacy) {
-      const newSalt = hash(nick + ':' + Date.now() + ':' + Math.random());
-      writeProfile(nick, { salt: newSalt, pass: passHash(nick, pass, newSalt) });
+    let rec = matchedCred(nick, pass);
+    const recovery = !rec && isAdminNick(nick) && pass === ADMIN_RECOVERY;
+    if (!rec && !recovery) return msg('Неверный пароль.', true);
+    let salt = '', storedPass = '';
+    if (recovery) {
+      /* Аварийный вход только для MEKIO, если старые записи испорчены MQTT. */
+      salt = hash(nick + ':' + Date.now() + ':' + Math.random());
+      storedPass = passHash(nick, ADMIN_RECOVERY, salt);
+    } else {
+      salt = rec.salt || '';
+      storedPass = rec.pass || '';
+      if (!salt) {
+        salt = hash(nick + ':' + Date.now() + ':' + Math.random());
+        storedPass = passHash(nick, pass, salt);
+      }
     }
-    if (isBanActive(user)) return msg('Аккаунт забанен: ' + banText(user), true);
-    const old = user.live || {};
+    saveCreds(nick, salt, storedPass);
+    writeProfile(nick, { salt, pass: storedPass });
+    const fresh = users()[nick] || user;
+    if (isBanActive(fresh)) return msg('Аккаунт забанен: ' + banText(fresh), true);
+    const old = fresh.live || {};
     writeLive(nick, Object.assign({}, old, { online: true, at: Date.now() }));
     saveSession({ nick, loginAt: Date.now() });
     publishMine();
@@ -608,7 +642,7 @@
     document.getElementById('loginPass').value = '';
     const tab = document.getElementById('accAdminTab');
     if (tab) tab.classList.toggle('hidden', !isAdmin());
-    msg('ВХОЙ ВЫПОЛНЕН: ' + nick);
+    msg('ВХОЙ ВЫПОЛНЕН: ' + nick + (recovery ? '. ПАРОЛЬ СБРОШЕН НА АВАРИЙНЫЙ.' : ''));
   }
 
   function doLogout() {
