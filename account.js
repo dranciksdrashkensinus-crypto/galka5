@@ -8,6 +8,8 @@
   const SESSION_KEY = 'galka_session_v2';
   const SEEN_KEY = 'galka_seen_v1';
   const VOTES_KEY = 'galka_board_votes_v1';
+  const BOARD_KEY = 'galka_board_v1';
+  const RESULT_KEY = 'galka_board_result_v1';
   const overlay = document.getElementById('accountOverlay');
   const banner = document.getElementById('adminMessage');
   let activeTab = 'login';
@@ -20,6 +22,8 @@
      so they hang on the screens of everyone who opens the game. */
   const board = {};
   let boardEnd = null;
+  let boardResult = null;
+  let boardVotes = read(VOTES_KEY, {});
   const lastActive = { notice: '', poll: '' };
   const defaultStats = () => ({
     completions: 0, bestMs: 0,
@@ -327,8 +331,76 @@
   function boardList() {
     return Object.keys(board).map(k => board[k]).sort((a, b) => (b.at || 0) - (a.at || 0));
   }
+  /* Cache keeps notices and polls on screen after a reload or while offline.
+     Expired records are dropped, so a stale copy can never come back. */
+  function saveBoardCache() { write(BOARD_KEY, board); }
+  function loadBoardCache() {
+    const cached = read(BOARD_KEY, {}), now = Date.now();
+    Object.keys(cached || {}).forEach(id => {
+      if (cached[id] && cached[id].until > now) board[id] = cached[id];
+    });
+    boardResult = read(RESULT_KEY, null);
+    saveBoardCache();
+  }
+  function myNick() {
+    const s = session();
+    return String((s && s.nick) || (G.net && G.net.nick && G.net.nick()) ||
+      ('ГОСТЬ-' + String((G.net && G.net.selfId) || '0000').slice(-4))).slice(0, 16);
+  }
+  function voteCounts(poll) {
+    const votes = boardVotes[poll.id] || {};
+    const counts = (poll.options || []).map(() => 0);
+    Object.keys(votes).forEach(n => {
+      const i = votes[n] && votes[n].option;
+      if (Number.isInteger(i) && counts[i] != null) counts[i]++;
+    });
+    return counts;
+  }
+  function winnerText(poll) {
+    const counts = voteCounts(poll), total = counts.reduce((a, b) => a + b, 0);
+    if (!total) return 'ИТОГИ ОПРОСА: НИКТО НЕ ПРОГОЛОСОВАЛ';
+    const top = Math.max.apply(Math, counts);
+    const winners = counts.map((n, i) => n === top ? i : -1).filter(i => i >= 0);
+    if (winners.length > 1) {
+      return 'ИТОГИ ОПРОСА: НЕОПРЕДЕЛЁННО · ПО ' + top + ' ГОЛОС(ОВ) У ВАРИАНТОВ ' +
+        winners.map(i => (i + 1) + ' «' + poll.options[i] + '»').join(', ');
+    }
+    const i = winners[0];
+    return 'ИТОГИ ОПРОСА: ПОБЕДИЛ ВАРИАНТ ' + (i + 1) + ' «' + poll.options[i] + '» · ' + top + ' ГОЛОС(ОВ)';
+  }
+  function finishPoll(poll) {
+    boardResult = { id: poll.id, text: winnerText(poll), until: Date.now() + 60000 };
+    write(RESULT_KEY, boardResult);
+    /* Retained result lets an admin who was offline when the poll closed
+       still see who won after opening or reloading the page. */
+    if (isAdmin()) send('accounts/board/' + poll.id + '/result', boardResult, true);
+  }
+  function clearVotes(id) {
+    const votes = boardVotes[id] || {};
+    Object.keys(votes).forEach(n => send('accounts/board/' + id + '/votes/' + n, null, true));
+    delete boardVotes[id];
+    write(VOTES_KEY, boardVotes);
+  }
+  function castVote(id, option) {
+    const cur = board[id];
+    if (!cur || cur.kind !== 'poll' || !Number.isInteger(option)) return;
+    const voter = myNick();
+    const v = { nick: voter, option, at: Date.now() };
+    boardVotes[id] = boardVotes[id] || {};
+    boardVotes[id][voter] = v;
+    write(VOTES_KEY, boardVotes);
+    send('accounts/board/' + id + '/votes/' + voter, v, true);
+    renderBoard();
+    renderAdminBoards();
+  }
   function pubBoard(obj) {
     board[obj.id] = obj;
+    saveBoardCache();
+    if (obj.kind === 'poll') {
+      boardResult = null;
+      try { localStorage.removeItem(RESULT_KEY); } catch (e) {}
+      send('accounts/board/' + obj.id + '/result', null, true);
+    }
     send('accounts/board/' + obj.id, obj, true);
     renderAdminBoards();
     renderBoard();
@@ -377,7 +449,10 @@
     if (!isAdmin()) return msg('Только админ может удалять сообщения.', true);
     const it = board[id];
     if (!it) return;
+    if (it.kind === 'poll') finishPoll(it);
+    clearVotes(id);
     delete board[id];
+    saveBoardCache();
     lastActive[it.kind] = '';
     send('accounts/board/' + id, null, true);
     boardEnd = {
@@ -405,11 +480,17 @@
       '<div class="board-entry">' + esc(x.text) + ' <small>· ' + fmtTime(x.until - now) + '</small>' +
       '<button data-action="delNotice" data-id="' + esc(x.id) + '">УДАЛИТЬ</button></div>').join('')
       : '<div class="acc-empty">Нет активных объявлений.</div>';
-    if (pBox) pBox.innerHTML = polls.length ? polls.map(x =>
-      '<div class="board-entry">' + esc(x.question) + ' <small>· ' + (x.options || []).length +
-      ' вар. · ' + fmtTime(x.until - now) + '</small>' +
-      '<button data-action="delPoll" data-id="' + esc(x.id) + '">ЗАКРЫТЬ</button></div>').join('')
-      : '<div class="acc-empty">Нет активных опросов.</div>';
+    if (pBox) pBox.innerHTML = polls.length ? polls.map(x => {
+      const votes = boardVotes[x.id] || {};
+      const voters = Object.keys(votes).map(n =>
+        esc(n) + ' → ' + ((votes[n] && votes[n].option != null)
+          ? (votes[n].option + 1) + '. ' + esc((x.options || [])[votes[n].option] || '') : '—'));
+      return '<div class="board-entry">' + esc(x.question) + ' <small>· ' + (x.options || []).length +
+        ' вар. · ' + fmtTime(x.until - now) + '</small>' +
+        '<button data-action="delPoll" data-id="' + esc(x.id) + '">ЗАКРЫТЬ</button>' +
+        '<div class="admin-progress">ГОЛОСА: ' + (voters.length ? voters.join(' · ') : 'пока никто не голосовал') + '</div>' +
+        '</div>';
+    }).join('') : '<div class="acc-empty">Нет активных опросов.</div>';
   }
 
   function renderBoard() {
@@ -424,13 +505,17 @@
           text: it.kind === 'notice' ? 'ОБЪЯВЛЕНИЕ ЗАВЕРШЕНО' : 'ОПРОС ЗАВЕРШЁН',
           until: now + 3500
         };
+        if (it.kind === 'poll') finishPoll(it);
         lastActive[it.kind] = '';
       }
+      if (it && it.kind === 'poll') clearVotes(id);
       delete board[id];
+      saveBoardCache();
     });
 
     const noticeEl = document.getElementById('adminNotice');
     const pollEl = document.getElementById('adminPoll');
+    const resultEl = document.getElementById('adminResult');
     const notice = boardList().filter(x => x.kind === 'notice')[0];
     const poll = boardList().filter(x => x.kind === 'poll')[0];
 
@@ -449,8 +534,8 @@
     if (pollEl) {
       if (poll) {
         lastActive.poll = poll.id;
-        const votes = read(VOTES_KEY, {});
-        const chosen = votes[poll.id];
+        const myVote = (boardVotes[poll.id] || {})[myNick()];
+        const chosen = myVote ? myVote.option : null;
         const options = (poll.options || []).slice(0, 10);
         pollEl.innerHTML = '<div class="board-q">❓ ' + esc(poll.question) +
           '<small> · ОСТАЛОСЬ ' + fmtTime(poll.until - now) + '</small></div>' +
@@ -463,6 +548,14 @@
         pollEl.textContent = boardEnd.text;
         pollEl.classList.remove('hidden');
       } else pollEl.classList.add('hidden');
+    }
+
+    /* Winner is admin-only: ordinary players just see "ОПРОС ЗАВЕРШЁН". */
+    if (resultEl) {
+      if (boardResult && boardResult.until > now && isAdmin()) {
+        resultEl.textContent = boardResult.text;
+        resultEl.classList.remove('hidden');
+      } else resultEl.classList.add('hidden');
     }
   }
 
@@ -676,10 +769,7 @@
     if (!b) return;
     const cur = boardList().filter(x => x.kind === 'poll')[0];
     if (!cur) return;
-    const votes = read(VOTES_KEY, {});
-    votes[cur.id] = parseInt(b.dataset.vote, 10);
-    write(VOTES_KEY, votes);
-    renderBoard();
+    castVote(cur.id, parseInt(b.dataset.vote, 10));
   });
 
   function tick() {
@@ -797,8 +887,25 @@
         afterChange();
       } else if (parts[0] === 'accounts' && parts[1] === 'board' && parts.length >= 3) {
         const id = parts[2];
-        if (val && val.id && val.until > Date.now()) board[id] = val;
-        else delete board[id];
+        if (parts.length >= 5 && parts[3] === 'votes') {
+          const voter = parts[4];
+          boardVotes[id] = boardVotes[id] || {};
+          if (val && val.option != null) boardVotes[id][voter] = val;
+          else delete boardVotes[id][voter];
+          write(VOTES_KEY, boardVotes);
+        } else if (parts.length === 4 && parts[3] === 'result') {
+          boardResult = val && val.until > Date.now() ? val : null;
+          if (boardResult) write(RESULT_KEY, boardResult);
+          else { try { localStorage.removeItem(RESULT_KEY); } catch (e) {} }
+        } else if (parts.length === 3) {
+          if (val && val.id && val.until > Date.now()) board[id] = val;
+          else {
+            if (val && val.kind === 'poll') finishPoll(val);
+            clearVotes(id);
+            delete board[id];
+          }
+          saveBoardCache();
+        }
         renderAdminBoards();
         renderBoard();
       } else if (parts[0] === 'accounts' && parts[1] === 'sync' && parts[2] === 'request') {
@@ -820,9 +927,12 @@
     });
   }
 
-  /* Countdowns run even when no account overlay is open. */
-  setInterval(renderBoard, 1000);
+  /* Cached board survives a reload; countdowns and live votes keep updating
+     even when no account overlay is open. */
+  loadBoardCache();
+  setInterval(() => { renderBoard(); renderAdminBoards(); }, 1000);
   renderBoard();
+  renderAdminBoards();
 
   window.addEventListener('beforeunload', () => {
     const s = session();
@@ -834,7 +944,8 @@
   G.accounts = {
     open, close, isOpen, tick, recordCompletion, recordChapter2, recordGangWin, updateLive,
     isAdmin, current, users, deleteAccount,
-    sendNotice, sendPoll, removeBoard, tickBoard: renderBoard, boardItems: boardList,
+    sendNotice, sendPoll, removeBoard, castVote, tickBoard: renderBoard,
+    boardItems: boardList, voteItems: () => boardVotes, myNick,
     hideAdminTab: () => { const t = document.getElementById('accAdminTab'); if (t) t.classList.add('hidden'); }
   };
 })(window.GALKA = window.GALKA || {});

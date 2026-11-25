@@ -398,6 +398,23 @@ body.touch-mode .touch-help { display: inline; }
 }
 .board-opts button.active { background: #2d7a56; border-color: #8affc8; color: #fff; }
 .board-answer { margin-top: 6px; color: #ffd98a; font-size: 11px; }
+.admin-result {
+  position: fixed;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  z-index: 42;
+  max-width: min(620px, 94vw);
+  padding: 9px 13px;
+  border: 2px solid #c77dff;
+  background: rgba(46,12,66,.96);
+  color: #f4dcff;
+  font: 700 12px "Consolas", monospace;
+  text-align: center;
+  box-shadow: 0 6px 24px rgba(0,0,0,.7);
+  pointer-events: none;
+}
+.board-poll:not(.hidden) + .admin-result { top: 100px; }
 
 body.touch-mode .account-card { font-size: 14px; }
 body.touch-mode .account-card input { font-size: 16px; }
