@@ -10,6 +10,7 @@
   const VOTES_KEY = 'galka_board_votes_v1';
   const BOARD_KEY = 'galka_board_v1';
   const RESULT_KEY = 'galka_board_result_v1';
+  const COLLAPSED_KEY = 'galka_board_collapsed_v1';
   const CREDS_KEY = 'galka_creds_v1';
   /* Владелец админки закреплён за аккаунтом MEKIO. Публичный MQTT не даёт
      надёжно хранить права: любой сохранённый профиль мог перезаписать флаг
@@ -31,6 +32,7 @@
   let boardEnd = null;
   let boardResult = null;
   let boardVotes = read(VOTES_KEY, {});
+  let collapsed = read(COLLAPSED_KEY, {});
   const lastActive = { notice: '', poll: '' };
   const defaultStats = () => ({
     completions: 0, bestMs: 0,
@@ -511,6 +513,26 @@
     }).join('') : '<div class="acc-empty">Нет активных опросов.</div>';
   }
 
+  /* Сворачивание привязано к конкретному сообщению: новое объявление или
+     опрос всегда открывается полностью, старый свёрнутый вид не мешает. */
+  function toggleMarkup(kind, open) {
+    return '<button type="button" class="board-toggle" data-collapse="' + kind + '"' +
+      ' aria-label="' + (open ? 'Свернуть' : 'Развернуть') + '">' + (open ? '−' : '▢') + '</button>';
+  }
+  function bindBoardToggle(id, kind) {
+    const el = document.getElementById(id);
+    if (!el || el.dataset.toggleBound) return;
+    el.dataset.toggleBound = '1';
+    el.addEventListener('click', e => {
+      if (!e.target.closest('[data-collapse="' + kind + '"]')) return;
+      const item = boardList().filter(x => x.kind === kind)[0];
+      if (!item) return;
+      if (collapsed[kind] === item.id) delete collapsed[kind];
+      else collapsed[kind] = item.id;
+      write(COLLAPSED_KEY, collapsed);
+      renderBoard();
+    });
+  }
   function renderBoard() {
     const now = Date.now();
     /* Expired items are gone everywhere; show a short "finished" line. */
@@ -540,13 +562,19 @@
     if (noticeEl) {
       if (notice) {
         lastActive.notice = notice.id;
-        noticeEl.innerHTML = '📢 ' + esc(notice.text) +
+        const isCollapsed = collapsed.notice === notice.id;
+        noticeEl.classList.toggle('collapsed', isCollapsed);
+        noticeEl.innerHTML = toggleMarkup('notice', !isCollapsed) +
+          (isCollapsed ? '📢 СВЁРНУТО · ' + esc(String(notice.text).slice(0, 46)) : '📢 ' + esc(notice.text)) +
           '<small> · ОСТАЛОСЬ ' + fmtTime(notice.until - now) + '</small>';
         noticeEl.classList.remove('hidden');
-      } else if (boardEnd && boardEnd.kind === 'notice' && boardEnd.until > now) {
-        noticeEl.textContent = boardEnd.text;
-        noticeEl.classList.remove('hidden');
-      } else noticeEl.classList.add('hidden');
+      } else {
+        noticeEl.classList.remove('collapsed');
+        if (boardEnd && boardEnd.kind === 'notice' && boardEnd.until > now) {
+          noticeEl.textContent = boardEnd.text;
+          noticeEl.classList.remove('hidden');
+        } else noticeEl.classList.add('hidden');
+      }
     }
 
     if (pollEl) {
@@ -555,17 +583,26 @@
         const myVote = (boardVotes[poll.id] || {})[myNick()];
         const chosen = myVote ? myVote.option : null;
         const options = (poll.options || []).slice(0, 10);
-        pollEl.innerHTML = '<div class="board-q">❓ ' + esc(poll.question) +
-          '<small> · ОСТАЛОСЬ ' + fmtTime(poll.until - now) + '</small></div>' +
-          '<div class="board-opts">' + options.map((o, i) =>
-            '<button type="button" data-vote="' + i + '"' + (chosen === i ? ' class="active"' : '') + '>' +
-            (i + 1) + '. ' + esc(o) + '</button>').join('') + '</div>' +
-          (chosen != null ? '<div class="board-answer">ТВОЙ ОТВЕТ: ' + esc(options[chosen] || '') + '</div>' : '');
+        const isCollapsed = collapsed.poll === poll.id;
+        pollEl.classList.toggle('collapsed', isCollapsed);
+        pollEl.innerHTML = toggleMarkup('poll', !isCollapsed) + (isCollapsed
+          ? '❓ СВЁРНУТО · ' + esc(String(poll.question).slice(0, 46)) +
+            '<small> · ОСТАЛОСЬ ' + fmtTime(poll.until - now) + '</small>' +
+            (chosen != null ? ' <span class="board-mini-answer">✓ ' + esc(options[chosen] || '') + '</span>' : '')
+          : '<div class="board-q">❓ ' + esc(poll.question) +
+            '<small> · ОСТАЛОСЬ ' + fmtTime(poll.until - now) + '</small></div>' +
+            '<div class="board-opts">' + options.map((o, i) =>
+              '<button type="button" data-vote="' + i + '"' + (chosen === i ? ' class="active"' : '') + '>' +
+              (i + 1) + '. ' + esc(o) + '</button>').join('') + '</div>' +
+            (chosen != null ? '<div class="board-answer">ТВОЙ ОТВЕТ: ' + esc(options[chosen] || '') + '</div>' : ''));
         pollEl.classList.remove('hidden');
-      } else if (boardEnd && boardEnd.kind === 'poll' && boardEnd.until > now) {
-        pollEl.textContent = boardEnd.text;
-        pollEl.classList.remove('hidden');
-      } else pollEl.classList.add('hidden');
+      } else {
+        pollEl.classList.remove('collapsed');
+        if (boardEnd && boardEnd.kind === 'poll' && boardEnd.until > now) {
+          pollEl.textContent = boardEnd.text;
+          pollEl.classList.remove('hidden');
+        } else pollEl.classList.add('hidden');
+      }
     }
 
     /* Winner is admin-only: ordinary players just see "ОПРОС ЗАВЕРШЁН". */
@@ -964,6 +1001,8 @@
   /* Cached board survives a reload; countdowns and live votes keep updating
      even when no account overlay is open. */
   loadBoardCache();
+  bindBoardToggle('adminNotice', 'notice');
+  bindBoardToggle('adminPoll', 'poll');
   setInterval(() => { renderBoard(); renderAdminBoards(); }, 1000);
   renderBoard();
   renderAdminBoards();
